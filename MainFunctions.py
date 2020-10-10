@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Sep 21 17:50:19 2020
-
+This file contains all relevant functions for impurity prediction and visualisation (Instructions for installation are provided under
+setup steps)
 @author: AADA01
 """
 # Setup steps

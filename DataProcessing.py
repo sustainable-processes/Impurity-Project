@@ -8,7 +8,7 @@ produces an ID list which is used to retrieve SMILES strings and mole files from
 @author: AADA01
 """
 
-from CaseStudy import openpickle
+from MainFunctions import openpickle
 
 #%% CANDIDATE REACTION PROCESSING (0 to 14; refer to excel sheet)
 #  Data is in pickle format (need to deserialize). No need pandas or numpy, can 
