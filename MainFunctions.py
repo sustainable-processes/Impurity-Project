@@ -22,12 +22,14 @@ setup steps)
 #On linux server: pip freeze > requirements.txt then pip install -r requirements.txt to download
 #all packages on new machine (https://itsfoss.com/python-setup-linux/)
 #GIT setup: https://git-scm.com/book/en/v2/Git-Basics-Getting-a-Git-Repository
+#Spyder shortcuts (ctrl alr r to clear namespace, alt shift w to clear plots)
 
 
 # %matplotlib inline
 from rdkit import Chem #Importing RDKit
 from rdkit.Chem import AllChem #Overall support
 from rdkit.Chem import FunctionalGroups
+from rdkit.Chem import PeriodicTable, GetPeriodicTable
 import cirpy
 from rdkit.Chem import RDConfig
 from rdkit.Chem import Draw #For drawing molecules/reactions
@@ -45,9 +47,12 @@ from ttictoc import tic,toc
 from rdkit.Chem import BRICS #For fragmenting
 from chempy import balance_stoichiometry
 import json
-import pickle #Default
-# import pickle5 as pickle #Only if pickle doesn't work
+# import pickle #Default
+import pickle5 as pickle #Only if pickle doesn't work
 import cairosvg
+from collections import Counter
+from helpCompound import hc_smilesDict
+from helpCompound import hc_molDict
 
 
 def maprxn(rxns):
@@ -93,10 +98,9 @@ def molfromsmiles(SMILES):
     '''
 
     mol=Chem.MolFromSmiles(SMILES)
-    AllChem.Compute2DCoords(mol)
-    fig=Draw.MolToMPL(mol)
     
-    return mol,fig
+    
+    return mol
 
 def bond_to_label(bond):
     '''
@@ -203,14 +207,32 @@ def drawReaction(rxn):
     # else:
     #     im=Image.open(io.BytesIO(img))
     #     return im
-        # d2d.WriteDrawingText('text.png') #Only works with cairo
+        # d2d.WriteDrawingText('text.png') #Only works with cairo, plus atom notes not included
     
-        
+def getlist(refdict,key):
+    '''
+    Gets list from a reference dictionary. Assumes refdict is a dictionary within a dictionary.
+    given a key
+
+    Parameters
+    ----------
+    refdict : Dictionary
+        Reference dictionary with keys as Reaxys ID
+    key : String
+        The reaction property that need to be retrieved
+
+    Returns
+    -------
+    list
+        DESCRIPTION.
+
+    '''
+    return [rxn[key] for rxn in refdict.values() if key in rxn.keys()]
         
         
 def writetofile(rxnimg,directory):
     '''
-    Takes a reaction image and saves it to a specified directory
+    Takes a reaction image and saves it to a specified directory (usually after calling drawReaction)
 
     Parameters
     ----------
@@ -228,9 +250,8 @@ def writetofile(rxnimg,directory):
 
 
 
-def convSVGtoPNG(filenames, filenamesout):
-    for index,fname in enumerate(filenames):
-        cairosvg.svg2png(url=fname+".svg", write_to=filenamesout[index]+".png")
+def convSVGtoPNG(filename, filenameout):
+    cairosvg.svg2png(url=filename+".svg", write_to=filenameout+".png")
     
     
     
@@ -270,6 +291,10 @@ def drawMol(m,filetype):
   
 #Save image to file
 # fig=Draw.MolToFile(p4,'example.png',size=(500,500))
+
+#Plotting in plot pane (matlab canvas)
+# AllChem.Compute2DCoords(mol)
+# fig=Draw.MolToMPL(mol)
 
 #Rxn image (quite small)
 # fig=Draw.ReactionToImage(rxn,subImgSize=(1000,1000))
@@ -646,14 +671,29 @@ def openpickle(filename):
     # return pickle.load(handle)
 
 def writepickle(pkl,filename):
-    with open('filename.pickle', 'wb') as handle:
+    '''
+    
+
+    Parameters
+    ----------
+    pkl : Pickle file
+        Destination file type
+    filename : Str
+        Directory to save in (exclude extension)
+
+    Returns
+    -------
+    None.
+
+    '''
+    with open(filename+'.pickle', 'wb') as handle:
         pickle.dump(pkl, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
 
 def getfragments(chemlist,refdict):
     '''
-    Retrieves smiles string for each chemical in a list given a reference
-    dictionary with reaxys ID as keys
+    Retrieves smiles string for each chemical (with reaxys ID) in a list given a reference
+    dictionary with reaxys ID as keys.
 
     Parameters
     ----------
@@ -668,17 +708,216 @@ def getfragments(chemlist,refdict):
         DESCRIPTION.
 
     '''
-
-    
     frag=''
-    for chem in chemlist:
+    if chemlist==[]:
+        print('ERROR: NO CHEMICALS IN LIST PROVIDED')
+    for idx,chem in enumerate(chemlist):
         if not refdict[chem]['Smiles']:
             print('component not in dictionary. Skipping..')
             continue
         frag+=refdict[chem]['Smiles']
-        if chem != chemlist[-1]:
+        if idx !=len(chemlist)-1:
             frag+='.'
     return frag
+
+def gethelpfragments(helplist,helpdict):
+    frag=''
+    if helplist==[]:
+        print('ERROR: NO CHEMICALS IN LIST PROVIDED')
+    for idx,hc in enumerate(helplist):
+        if not helpdict[hc]:
+            print('component not in dictionary. Skipping..')
+            continue
+        frag+=helpdict[hc]
+        if idx !=len(helplist)-1:
+            frag+='.'
+    return frag
+
+
+def atomtypes(mol):
+    """
+    Generates an atom type dictionary with counting for a given mol file. Also returns overall
+    charge of the molecule. It may be possible to directly go from formula to atom type
+
+    Parameters
+    ----------
+    mol : mol file
+        Mol file of chemical
+
+    Returns
+    -------
+    typedict : Dictionary
+        Dictionary with keys as element and value as count
+    charge : integer
+        Overall charge of supplied molecule
+
+    """
+    
+    typedict={}
+    mol2=Chem.AddHs(mol) #Assumes hydrogens are added
+    charge=0
+    for atom in mol2.GetAtoms():
+        elem=PeriodicTable.GetElementSymbol(GetPeriodicTable(),atom.GetAtomicNum())
+        charge+=atom.GetFormalCharge()
+        if elem not in typedict.keys():
+            typedict[elem]=1
+        else:
+            typedict[elem]+=1 
+    return typedict, charge
+
+# def balancerxn(rxnid,rxnlib,smles):
+    
+            
+
+def isbalanced(rxnid,rxnlib,smles):
+    '''
+    Outputs whether reaction is balanced. If not balanced, attempts to balance
+    with a series of help compounds. If successful, stoichiometry coefficients
+    are outputted as well. Assumes help compounds are not analogue compounds.
+
+    Parameters
+    ----------
+    rxnid : TYPE
+        DESCRIPTION.
+    rxnlib : TYPE
+        DESCRIPTION.
+    smles : TYPE
+        DESCRIPTION.
+
+    Raises
+    ------
+    Exception
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    '''
+    if rxnid not in rxnlib.keys():
+        print('Reaction '+rxnid+ ' is not present in reaction library. Please supply a valid Reaxys ID or update the dictionary')
+        return False
+    Rcount=Counter({}) #Used to cumulatively add atom count across reactants
+    Pcount=Counter({}) #Used to cumulatively add atom count across products
+    Rcharge=0 #Used to cumulatively add formal charge across reactants
+    Pcharge=0 #Used to cumulatively add formal charge across products
+    Rdata={} #Stores atom count and type for each reactant
+    Pdata={} #Stores atom count and type for each product
+    
+    #Reaction parsing
+    for reactant in rxnlib[rxnid]['Reactants']:
+        #Error handling
+        if reactant=='':
+            print('No reactants in reaction. '+ 'Reaction '+rxnid+ ' will be screened out')
+            return False
+        elif reactant not in smles.keys():
+            print('Reactant '+reactant+' not in substance dictionary. '+ 'Reaction '+rxnid+ ' will be screened out')
+            return False
+        elif ('Carrier Fragment' not in smles[reactant].keys()): #Or if not smles[reactant].get('Carrier Fragment):
+            print('Reactant '+reactant+' is not an analogue compound. '+ 'Reaction '+rxnid+ ' will be screened out')
+            return False
+        
+        #Main code
+        
+        rmol=smles[reactant]['Mol']
+        Rdata[reactant]=atomtypes(rmol)[0]
+        Rcount+=Counter(Rdata[reactant])
+        Rcharge+=atomtypes(rmol)[1]
+            
+    #Product parsing
+    for product in rxnlib[rxnid]['Products']:
+        #Error handling
+        if product=='':
+            print('No products in reaction. ' + 'Reaction '+rxnid+ ' will be screened out')
+            return False
+        elif product not in smles.keys():
+            print('Product '+product+' not in substance dictionary. ' + 'Reaction '+rxnid+ ' will be screened out')
+            return False
+        
+        #Main code
+        pmol=smles[product]['Mol']
+        Pdata[product]=atomtypes(pmol)[0]
+        Pcount+=Counter(Pdata[product])
+        Pcharge+=atomtypes(pmol)[1]
+    
+    if Rcount==Pcount and Rcharge==Pcharge:
+        print('Reaction '+rxnid+ ' is fully balanced')
+        return True  #Same number and type of atoms reactant and product side and same charge ie. perfectly balanced reaction. Include.
+    elif Rcharge!=Pcharge: #Does not deal with charge imbalance yet. Reaction is screened out
+        print('Charge is not balanced. ' + 'Reaction '+rxnid+ ' will be screened out')
+        return False
+    elif Rcount.keys()!=Pcount.keys(): #Screen out reactions where new atom types are in the product that weren't in reactants. This means reagent/solvent needed
+        print('New atom types introduced in products. Reagents and/or solvents may be coreactants. ' + 'Reaction '+rxnid+ ' will be screened out')
+        return False
+    else: #Charge balance is met but not mol balance.Can use new function
+        print('Reaction '+rxnid+' needs to be balanced. Initializing...')
+        chempyr={smles[reactant]['Formula'] for reactant in rxnlib[rxnid]['Reactants']}
+        chempyp={smles[product]['Formula'] for product in rxnlib[rxnid]['Products']}
+        try:
+            reac, prod = balance_stoichiometry(chempyr, chempyp) #Try balancing once without adding compounds
+            if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
+                raise Exception
+            else:
+                print('Reaction '+rxnid+' successfully balanced')
+                return True,reac,prod
+        except Exception: # Fails if missing compounds either on reactant or product side
+            print('Help compounds may need to be added to balance reaction '+rxnid+'. Proceeding...')
+            rem=Counter() # Rem contains difference between product and reactant counters
+            rem.update(Pcount)  #If atoms not balanced and same charge, attempt to balance. Can try if different charge but more tricky
+            rem.subtract(Rcount) #Subtracting reactant atom type index from product atom type index
+            poskey=[key for key in rem.keys() if rem[key]>0] #Finding only positive keys. Note that if counter is positive this means extra molecules need to be added to the reactant side.
+            negkey=[key for key in rem.keys() if rem[key]<0] #Finding only negative keys. This means that extra molecules need to be added to the product side
+        
+        # 3 conditions: rem is all negative. In this case, match atom type dictionary of rem with that of a help compound. Better than testing each one
+        # iteratively using chempy. If rem is positive and negative or just positive, no choice but to test one by one. This code will not
+        # consider more than 1 help compound at a time, so there will be limitations (ie. reactions that require 2 or more help compounds will be screened out). 
+        # There is also an assumption that no help compound is an analogue compound. This is why nothing is added to the reactant side as if this is the case, 
+        # the reaction has to be screened out anyway.
+        
+            postype={}
+            negtype={}
+            hc_atomtype={hc: atomtypes(hc_molDict[hc])[0] for hc in hc_molDict if atomtypes(hc_molDict[hc])[1]==0} #Atom type for help compounds
+        
+            if poskey: 
+                postype={key: rem[key] for key in poskey}
+            if negkey:
+                negtype={key: abs(rem[key]) for key in negkey}
+        
+        
+            if not postype: #This means excess molecules only on reactant side. Attempt to add help compounds to product side(one only not combinations)
+                hc_list=[hc for hc in hc_atomtype if hc_atomtype[hc].keys()==negtype.keys()] #Narrow down list of help compounds
+                if hc_list:
+                    for hc in hc_list:
+                        chempyp.add(hc)
+                        try:
+                            reac, prod = balance_stoichiometry(chempyr, chempyp)
+                            if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
+                                raise Exception
+                            else:
+                                print('Reaction '+rxnid+' successfully balanced')
+                                return True,reac,prod
+                        except Exception:
+                            chempyp.remove(hc)
+                            continue
+                print('Help compounds did not help. '+'Reaction '+rxnid+' will still be kept, but there are extra reactant atoms')
+                return True,'Warning'
+            else:
+                for hc in hc_atomtype:
+                    chempyp.add(hc)
+                    try:
+                        reac, prod = balance_stoichiometry(chempyr, chempyp)
+                        if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
+                            raise Exception
+                        else:
+                            print('Reaction '+rxnid+' successfully balanced')
+                            return True,reac,prod
+                    except Exception:
+                        chempyp.remove(hc)
+                        continue
+                print('Reaction '+rxnid+' could not be balanced. Help compounds did not help. '+' Reaction '+rxnid+' will be screened out')
+                return False
+        
 
 
 def getMols(IDs):
@@ -699,8 +938,7 @@ def getMols(IDs):
     # relies on Jana's files
     str_cwd = os.getcwd()
     os.chdir('/home/projects/graph/data/')
-    folderNames = [_ for _ in os.listdir('.') if os.path.isdir(_)] #
-# folder name and IDslist file name with .dat are same
+    folderNames = [_ for _ in os.listdir('.') if os.path.isdir(_)] #folder name and IDslist file name with .dat are same
     IDslen = len(IDs)
     mols = [None]*IDslen
     for i in range(IDslen):
