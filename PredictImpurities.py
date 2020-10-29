@@ -121,8 +121,8 @@ def predict_impurities(casenum, visualizeoutput=True):
     
     #%% Writing images to file (remove comment if case changes)
     if visualizeoutput:
-    
-        directory=os.path.join(os.getcwd(),'Images\\'+casenum+'\\Sketches_Full')
+        sep=os.sep
+        directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_Full')
         if not os.path.isdir(directory):
             os.makedirs(directory)
         for rxnid in rxnlib.keys():
@@ -130,14 +130,14 @@ def predict_impurities(casenum, visualizeoutput=True):
             convSVGtoPNG(os.path.join(directory,rxnid),os.path.join(directory,rxnid))
         
         
-        directory=os.path.join(os.getcwd(),'Images\\'+casenum+'\\Sketches_ReactantOnly')
+        directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_ReactantOnly')
         if not os.path.isdir(directory):
             os.makedirs(directory)
         for rxnid in rxnlib.keys():
             writetofile(rxnlib[rxnid]['Sketch2'],os.path.join(directory,rxnid+'.svg'))
             convSVGtoPNG(os.path.join(directory,rxnid),os.path.join(directory,rxnid))
         
-        directory=os.path.join(os.getcwd(),'Images\\'+casenum+'\\Sketches_Analogue')
+        directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_Analogue')
         if not os.path.isdir(directory):
             os.makedirs(directory)
         for rxnid in analogue_rxns.keys():
@@ -147,7 +147,7 @@ def predict_impurities(casenum, visualizeoutput=True):
                 writetofile(analogue_rxns[rxnid]['Sketch'],os.path.join(directory,rxnid+'.svg'))
             convSVGtoPNG(os.path.join(directory,rxnid),os.path.join(directory,rxnid))
         
-        directory=os.path.join(os.getcwd(),'Images\\'+casenum+'\\Impurities')
+        directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Impurities')
         if not os.path.isdir(directory):
             os.makedirs(directory)
         for rxnid in template_dict.keys():

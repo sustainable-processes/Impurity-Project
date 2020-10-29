@@ -14,8 +14,8 @@ from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickl
 from FindFunctionalGroups import identify_functional_groups as IFG
 
 def processdata(casenum):
-
-    inputdir=os.path.join(os.getcwd(),'Input\\'+casenum) 
+    sep=os.sep
+    inputdir=os.path.join(os.getcwd(),'Input'+sep+casenum) 
     #%% CANDIDATE REACTION PROCESSING (0 to 14; refer to excel sheet)
     #  Data is in pickle format (need to deserialize). No need pandas or numpy, can 
     # directly read.This cell assembles a dictionary based on candidate reactions extracted from
