@@ -390,7 +390,7 @@ def getfragments(chemlist,refdict):
     if chemlist==[]:
         print('ERROR: NO CHEMICALS IN LIST PROVIDED')
     for idx,chem in enumerate(chemlist):
-        if not refdict[chem]['Smiles']:
+        if not refdict.get(chem):
             print('component not in dictionary. Skipping..')
             continue
         frag+=refdict[chem]['Smiles']

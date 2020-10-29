@@ -32,10 +32,12 @@ def screening(casenum):
         reacstrl.append(reac)
         if rxn['Reagents'][0]!='': 
             reag=getfragments(rxn['Reagents'], smles)
-            reacstrl.append(reag)
+            if reag:
+                reacstrl.append(reag)
         if rxn['Solvent'][0]!='':
             solv=getfragments(rxn['Solvent'],smles)
-            reacstrl.append(solv)
+            if solv:
+                reacstrl.append(solv)
         reacstr='.'.join(reacstrl)
         prodstr=getfragments(rxn['Products'],smles)  #Calls getfragments() to generate reaction string containing products (smiles strings from reference substance dictionary)
         currrxnstr='{}>>{}'.format(reacstr,prodstr) #reacstr if want to include reagents, solvents 
@@ -151,4 +153,5 @@ def screening(casenum):
             template_dict.update({rxnid:rxn})
     
     return rxnlib,smles,analogue_rxns,template_dict
-        
+
+# output=screening('Case1')
