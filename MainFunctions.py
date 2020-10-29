@@ -50,11 +50,13 @@ import json
 # import pickle #Default
 import pickle5 as pickle #Only if pickle doesn't work
 import cairosvg
+import copy
 from collections import Counter
-from helpCompound import hc_smilesDict
-from helpCompound import hc_molDict
+from helpCompound import hc_smilesDict, hc_molDict 
+from FindFunctionalGroups import identify_functional_groups as IFG
 
 
+#%% Reaction Mapping
 def maprxn(rxns):
     """
     For a given list of reactions, rxns, returns mapped reactions with confidence scores.
@@ -79,7 +81,7 @@ def maprxn(rxns):
     return rxn_mapper.get_attention_guided_atom_maps(rxns)
 
 
-
+#%% Generating mol files
 def molfromsmiles(SMILES):
     '''
     Converts a smiles string into a mol object for RDKit use. Also graphically
@@ -102,32 +104,7 @@ def molfromsmiles(SMILES):
     
     return mol
 
-def bond_to_label(bond):
-    '''
-    This function takes an RDKit bond and creates a label describing
-    the most important attributes
-
-    Parameters
-    ----------
-    bond : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    TYPE
-        DESCRIPTION.
-
-    '''
-    a1_label = str(bond.GetBeginAtom().GetAtomicNum())
-    a2_label = str(bond.GetEndAtom().GetAtomicNum())
-    if bond.GetBeginAtom().HasProp('molAtomMapNumber'):
-        a1_label += bond.GetBeginAtom().GetProp('molAtomMapNumber')
-    if bond.GetEndAtom().HasProp('molAtomMapNumber'):
-        a2_label += bond.GetEndAtom().GetProp('molAtomMapNumber')
-    atoms = sorted([a1_label, a2_label])
-
-    # return '{}{}{}'.format(atoms[0], bond.GetSmarts(), atoms[1])
-    return '{}{}'.format(atoms[0], atoms[1])   
+#%% Drawing reactions/mols
 
 
 def mol_with_atom_index(mol):
@@ -208,55 +185,7 @@ def drawReaction(rxn):
     #     im=Image.open(io.BytesIO(img))
     #     return im
         # d2d.WriteDrawingText('text.png') #Only works with cairo, plus atom notes not included
-    
-def getlist(refdict,key):
-    '''
-    Gets list from a reference dictionary. Assumes refdict is a dictionary within a dictionary.
-    given a key
 
-    Parameters
-    ----------
-    refdict : Dictionary
-        Reference dictionary with keys as Reaxys ID
-    key : String
-        The reaction property that need to be retrieved
-
-    Returns
-    -------
-    list
-        DESCRIPTION.
-
-    '''
-    return [rxn[key] for rxn in refdict.values() if key in rxn.keys()]
-        
-        
-def writetofile(rxnimg,directory):
-    '''
-    Takes a reaction image and saves it to a specified directory (usually after calling drawReaction)
-
-    Parameters
-    ----------
-    rxnimg : TYPE
-        DESCRIPTION.
-    directory : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    None.
-
-    '''
-    open(directory,'w').write(rxnimg.data)
-
-
-
-def convSVGtoPNG(filename, filenameout):
-    cairosvg.svg2png(url=filename+".svg", write_to=filenameout+".png")
-    
-    
-    
-    
-    
 def drawMol(m,filetype):
     '''
     
@@ -299,6 +228,235 @@ def drawMol(m,filetype):
 #Rxn image (quite small)
 # fig=Draw.ReactionToImage(rxn,subImgSize=(1000,1000))
     
+
+
+#%% Utility Functions
+
+def openpickle(filename):
+    '''
+    Takes a pickled file and loads it
+
+    Parameters
+    ----------
+    filename : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    loadfile : TYPE
+        DESCRIPTION.
+
+    '''
+    infile=open(filename,'rb')
+    infile.seek(0)
+    loadfile=pickle.load(infile)
+    infile.close()
+    return loadfile
+    # with open('filename', 'rb') as handle: #Faster way
+    # return pickle.load(handle)
+
+def writepickle(pkl,filename):
+    '''
+    
+
+    Parameters
+    ----------
+    pkl : Pickle file
+        Destination file type
+    filename : Str
+        Directory to save in (exclude extension)
+
+    Returns
+    -------
+    None.
+
+    '''
+    with open(filename+'.pickle', 'wb') as handle:
+        pickle.dump(pkl, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        
+
+def getlist(refdict,key):
+    '''
+    Gets list from a reference dictionary. Assumes refdict is a dictionary within a dictionary.
+    given a key
+
+    Parameters
+    ----------
+    refdict : Dictionary
+        Reference dictionary with keys as Reaxys ID
+    key : String
+        The reaction property that need to be retrieved
+
+    Returns
+    -------
+    list
+        DESCRIPTION.
+
+    '''
+    return [rxn[key] for rxn in refdict.values() if key in rxn.keys()]
+        
+        
+def writetofile(rxnimg,directory):
+    '''
+    Takes a reaction image and saves it to a specified directory (usually after calling drawReaction)
+
+    Parameters
+    ----------
+    rxnimg : TYPE
+        DESCRIPTION.
+    directory : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    '''
+    open(directory,'w').write(rxnimg.data)
+
+
+
+def convSVGtoPNG(filename, filenameout):
+    '''
+    Converts SVG images to PNG images for easier copy pasting (eg./ to Word)
+
+    Parameters
+    ----------
+    filename : TYPE
+        DESCRIPTION.
+    filenameout : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    '''
+    cairosvg.svg2png(url=filename+".svg", write_to=filenameout+".png")
+    
+    
+def getMols(IDs):
+    '''
+    Retrieves smiles strings from a set of Reaxys IDs using the cambridge server
+    Connect via VPN
+
+    Parameters
+    ----------
+    IDs : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    '''
+    # relies on Jana's files
+    str_cwd = os.getcwd()
+    os.chdir('/home/projects/graph/data/')
+    folderNames = [_ for _ in os.listdir('.') if os.path.isdir(_)] #folder name and IDslist file name with .dat are same
+    IDslen = len(IDs)
+    mols = [None]*IDslen
+    for i in range(IDslen):
+        for folderName in folderNames:
+            try:
+                os.chdir('/home/projects/graph/data/' + folderName)
+                mols[i] = Chem.MolFromMolFile(IDs[i])
+                break    # if get mol
+            except:
+                continue
+    os.chdir(str_cwd)
+    return mols #Can streamline into the main code   
+    
+    
+def getfragments(chemlist,refdict):
+    '''
+    Builds reaction smiles string for each chemical (with reaxys ID) in a list given a reference
+    dictionary with reaxys ID as keys.
+
+    Parameters
+    ----------
+    chemlist : TYPE
+        DESCRIPTION.
+    refdict : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    frag : TYPE
+        DESCRIPTION.
+
+    '''
+    frag=''
+    if chemlist==[]:
+        print('ERROR: NO CHEMICALS IN LIST PROVIDED')
+    for idx,chem in enumerate(chemlist):
+        if not refdict[chem]['Smiles']:
+            print('component not in dictionary. Skipping..')
+            continue
+        frag+=refdict[chem]['Smiles']
+        if idx !=len(chemlist)-1:
+            frag+='.'
+    return frag
+
+def gethelpfragments(helplist,helpdict):
+    '''
+    Builds reaction smiles string for each chemical (with reaxys ID) in a list given a reference
+    help compound dictionary with reaxys ID as keys.
+
+    Parameters
+    ----------
+    helplist : TYPE
+        DESCRIPTION.
+    helpdict : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    frag : TYPE
+        DESCRIPTION.
+
+    '''
+    frag=''
+    if helplist==[]:
+        print('ERROR: NO CHEMICALS IN LIST PROVIDED')
+    for idx,hc in enumerate(helplist):
+        if not helpdict[hc]:
+            print('component not in dictionary. Skipping..')
+            continue
+        frag+=helpdict[hc]
+        if idx !=len(helplist)-1:
+            frag+='.'
+    return frag
+
+#%% Reaction Center Identification
+
+def bond_to_label(bond):
+    '''
+    This function takes an RDKit bond and creates a label describing
+    the most important attributes
+
+    Parameters
+    ----------
+    bond : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    '''
+    a1_label = str(bond.GetBeginAtom().GetAtomicNum())
+    a2_label = str(bond.GetEndAtom().GetAtomicNum())
+    if bond.GetBeginAtom().HasProp('molAtomMapNumber'):
+        a1_label += bond.GetBeginAtom().GetProp('molAtomMapNumber')
+    if bond.GetEndAtom().HasProp('molAtomMapNumber'):
+        a2_label += bond.GetEndAtom().GetProp('molAtomMapNumber')
+    atoms = sorted([a1_label, a2_label])
+
+    # return '{}{}{}'.format(atoms[0], bond.GetSmarts(), atoms[1])
+    return '{}{}'.format(atoms[0], atoms[1])   
+
 
 
 def atoms_are_different(atom1, atom2, level = 1):
@@ -639,100 +797,8 @@ def get_fragments_for_changed_atoms(mapdict,changed_mapidx, category, radius = 0
     #     # Initialize list of replacement symbols (updated during expansion)
         
         
-        
-        
-        
-def gen_template(reactant_fragments,product_fragments):
-    rxn_string = '{}>>{}'.format(reactant_fragments, product_fragments)
-    return rxn_string
-    
-    
-def openpickle(filename):
-    '''
-    Takes a pickled file and loads it
 
-    Parameters
-    ----------
-    filename : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    loadfile : TYPE
-        DESCRIPTION.
-
-    '''
-    infile=open(filename,'rb')
-    infile.seek(0)
-    loadfile=pickle.load(infile)
-    infile.close()
-    return loadfile
-    # with open('filename', 'rb') as handle: #Faster way
-    # return pickle.load(handle)
-
-def writepickle(pkl,filename):
-    '''
-    
-
-    Parameters
-    ----------
-    pkl : Pickle file
-        Destination file type
-    filename : Str
-        Directory to save in (exclude extension)
-
-    Returns
-    -------
-    None.
-
-    '''
-    with open(filename+'.pickle', 'wb') as handle:
-        pickle.dump(pkl, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    
-
-def getfragments(chemlist,refdict):
-    '''
-    Retrieves smiles string for each chemical (with reaxys ID) in a list given a reference
-    dictionary with reaxys ID as keys.
-
-    Parameters
-    ----------
-    chemlist : TYPE
-        DESCRIPTION.
-    refdict : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    frag : TYPE
-        DESCRIPTION.
-
-    '''
-    frag=''
-    if chemlist==[]:
-        print('ERROR: NO CHEMICALS IN LIST PROVIDED')
-    for idx,chem in enumerate(chemlist):
-        if not refdict[chem]['Smiles']:
-            print('component not in dictionary. Skipping..')
-            continue
-        frag+=refdict[chem]['Smiles']
-        if idx !=len(chemlist)-1:
-            frag+='.'
-    return frag
-
-def gethelpfragments(helplist,helpdict):
-    frag=''
-    if helplist==[]:
-        print('ERROR: NO CHEMICALS IN LIST PROVIDED')
-    for idx,hc in enumerate(helplist):
-        if not helpdict[hc]:
-            print('component not in dictionary. Skipping..')
-            continue
-        frag+=helpdict[hc]
-        if idx !=len(helplist)-1:
-            frag+='.'
-    return frag
-
+#%% Screening and balancing reactions (First cut)
 
 def atomtypes(mol):
     """
@@ -917,41 +983,61 @@ def isbalanced(rxnid,rxnlib,smles):
                         continue
                 print('Reaction '+rxnid+' could not be balanced. Help compounds did not help. '+' Reaction '+rxnid+' will be screened out')
                 return False
+
+
+#%% Screening based on reaction center (Second cut)
+
+
+
+def valid_rxn_center(rxnid,analoguerxns,smles):
+    rxn=analoguerxns[rxnid]
+    if 'Balanced Reaction Center' in rxn.keys():
+        RC=rxn['Balanced Reaction Center']
+        rdrxn=rxn['Balanced RDKit Rxn']
+    else:
+        RC=rxn['Reaction Center2']
+        rdrxn=rxn['RDKit Rxn2']
+    clean_rxn=copy.copy(rdrxn)
+    rdChemReactions.RemoveMappingNumbersFromReactions(clean_rxn)
+    mapset=set() #This cumulatively stores mapping numbers of carrier fragment atoms within reactant
+    funcgroupset=set() #This cumulatively stores mapping numbers of functional groups within reactant
+    carrier_frag=''
+    reacfragloc={} #This stores mapping numbers and atom indices of carrier fragment atoms within the reactant
+    for idx,reactant in enumerate(clean_rxn.GetReactants()):
+        rdreactant=rdrxn.GetReactants()[idx]
+        for reacid in rxn['Reactants']:
+            if smles[reacid]['Smiles']==Chem.MolToSmiles(reactant):
+                carrier_frag=smles[reacid]['Carrier Fragment']
+                break
+        matches=rdreactant.GetSubstructMatches(Chem.RemoveAllHs(Chem.MolFromSmarts(carrier_frag))) #tuples of atom indices
+        fraglocmap={rdreactant.GetAtomWithIdx(atomidx).GetAtomMapNum() for match in matches for atomidx in match}
+        fraglocidx={atomidx for match in matches for atomidx in match}
+        if reacfragloc.get(reacid):
+            reacfragloc[reacid][0].extend([fraglocmap])
+            reacfragloc[reacid][1].extend([fraglocidx])
+        else:
+            reacfragloc.update({reacid:([fraglocmap],[fraglocidx])})
         
+        funcgroupmatches=IFG(Chem.RemoveAllHs(rdreactant))
+        if mapset and funcgroupset:
+            mapset=mapset.union(fraglocmap)
+            funcgroupset=funcgroupset.union({rdreactant.GetAtomWithIdx(atomidx).GetAtomMapNum() for match in funcgroupmatches for atomidx in match.atomIds})    #Atom indices, atoms and type of functional group within carrier fragment
+        else:
+            mapset=fraglocmap
+            funcgroupset={rdreactant.GetAtomWithIdx(atomidx).GetAtomMapNum() for match in funcgroupmatches for atomidx in match.atomIds}
+    if RC and set(RC).issubset(mapset) and set(RC).issubset(funcgroupset): #Check if reaction center exists, it is part of the carrier fragment and it is at a functional group
+        return True,reacfragloc,clean_rxn
+    else:
+        return False
 
 
-def getMols(IDs):
-    '''
-    Retrieves smiles strings from a set of Reaxys IDs using the cambridge server
-    Connect via VPN
 
-    Parameters
-    ----------
-    IDs : TYPE
-        DESCRIPTION.
 
-    Returns
-    -------
-    None.
+#%% Template generation
 
-    '''
-    # relies on Jana's files
-    str_cwd = os.getcwd()
-    os.chdir('/home/projects/graph/data/')
-    folderNames = [_ for _ in os.listdir('.') if os.path.isdir(_)] #folder name and IDslist file name with .dat are same
-    IDslen = len(IDs)
-    mols = [None]*IDslen
-    for i in range(IDslen):
-        for folderName in folderNames:
-            try:
-                os.chdir('/home/projects/graph/data/' + folderName)
-                mols[i] = Chem.MolFromMolFile(IDs[i])
-                break    # if get mol
-            except:
-                continue
-    os.chdir(str_cwd)
-    return mols #Can streamline into the main code
-
+def gen_template(reactant_fragments,product_fragments):
+    rxn_string = '{}>>{}'.format(reactant_fragments, product_fragments)
+    return rxn_string
 
 
     
