@@ -19,8 +19,8 @@ import copy
 
 
 def screening(casenum):
-    
-    inputdir=os.path.join(os.getcwd(),'Input\\'+casenum)
+    sep=os.sep
+    inputdir=os.path.join(os.getcwd(),'Input'+sep+casenum)
     rxnlib=openpickle(os.path.join(inputdir,'rxnlib.pickle'))
     smles=openpickle(os.path.join(inputdir,'smles.pickle'))
 
