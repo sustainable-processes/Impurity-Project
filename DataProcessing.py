@@ -12,7 +12,7 @@ needs candidate_rxns.pkl (generated from upstream workflow) in the working direc
 
 from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickle, getfragments,gethelpfragments,maprxn,rdMolDraw2D,drawReaction,parsemap,get_changed_atoms, os, writetofile,getlist,convSVGtoPNG, balance_stoichiometry,writepickle,json,isbalanced,hc_smilesDict,hc_molDict, valid_rxn_center
 from FindFunctionalGroups import identify_functional_groups as IFG
-
+#%%
 def processdata(casenum):
     sep=os.sep
     inputdir=os.path.join(os.getcwd(),'Input'+sep+casenum) 
@@ -101,18 +101,24 @@ def processdata(casenum):
     for idx,mol in enumerate(mols):
         if mol:
             subst_id=idlist[idx]
+            subst_info={'Smiles': Chem.MolToSmiles(mol),'Mol': mol,'Formula': Chem.rdMolDescriptors.CalcMolFormula(mol)}
+            if subst_id=='11323289': #Exception handling for MnO2 (smiles string incorrect)
+                smiles_re='O=[Mn]=O'
+                mol_re=Chem.MolFromSmiles(smiles_re)
+                formula_re=Chem.rdMolDescriptors.CalcMolFormula(mol_re)
+                subst_info.update({'Smiles': smiles_re, 'Mol': mol_re, 'Formula': formula_re})
             for dic in rxt_assigns:
                 if dic.get(subst_id):
                     carrier_frag=dic.get(subst_id)[0][1]
                     query_compd=dic.get(subst_id)[0][0]
-            subst_info={'Smiles': Chem.MolToSmiles(mol),'Mol': mol,'Formula': Chem.rdMolDescriptors.CalcMolFormula(mol)}
-            subst_info.update({'Carrier Fragment': carrier_frag,'Query Compound': query_compd})
+                    subst_info.update({'Carrier Fragment': carrier_frag,'Query Compound': query_compd})
             smles.update({subst_id: subst_info})
         else:
             continue
     writepickle(rxnlib,os.path.join(inputdir,'rxnlib'))
     writepickle(smles,os.path.join(inputdir,'smles'))
-        
+    
+    # return smles, rxnlib, idlist    
         
         
 

@@ -50,7 +50,7 @@ import json
 # import pickle #Default
 import pickle5 as pickle #Only if pickle doesn't work
 import cairosvg
-import copy
+import copy, itertools
 from collections import Counter
 from helpCompound import hc_smilesDict, hc_molDict 
 from FindFunctionalGroups import identify_functional_groups as IFG
@@ -392,6 +392,8 @@ def getfragments(chemlist,refdict):
     for idx,chem in enumerate(chemlist):
         if not refdict.get(chem):
             print('component not in dictionary. Skipping..')
+            if idx==len(chemlist)-1:
+                frag=frag[:-1]
             continue
         frag+=refdict[chem]['Smiles']
         if idx !=len(chemlist)-1:
@@ -861,9 +863,7 @@ def isbalanced(rxnid,rxnlib,smles):
         DESCRIPTION.
 
     '''
-    if rxnid not in rxnlib.keys():
-        print('Reaction '+rxnid+ ' is not present in reaction library. Please supply a valid Reaxys ID or update the dictionary')
-        return False
+    import pdb; pdb.set_trace()
     Rcount=Counter({}) #Used to cumulatively add atom count across reactants
     Pcount=Counter({}) #Used to cumulatively add atom count across products
     Rcharge=0 #Used to cumulatively add formal charge across reactants
@@ -871,26 +871,64 @@ def isbalanced(rxnid,rxnlib,smles):
     Rdata={} #Stores atom count and type for each reactant
     Pdata={} #Stores atom count and type for each product
     
+    def tryhelp(hc_atomtype,chempyr,chempyp,rxnid,keep=False):
+        for hc in hc_atomtype:
+            chempyp.add(hc)
+            try:
+                reac, prod = balance_stoichiometry(chempyr, chempyp)
+                if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
+                    raise Exception
+                else:
+                    print('Reaction '+rxnid+' successfully balanced')
+                    return True,reac,prod
+            except Exception:
+                chempyp.remove(hc)
+                continue
+        if keep:
+            print('Help compounds did not help. '+'Reaction '+rxnid+' will still be kept, but there are extra reactant atoms')
+            return True,'Warning'
+        else:
+            print('Reaction '+rxnid+' could not be balanced. Help compounds did not help. '+' Reaction '+rxnid+' will be screened out')
+            return False
+    
+    def checksimilar(Rdata,Pdata):
+        similarspecies=set()
+        for product,patomtype in Pdata.items():
+            psettype=set(patomtype)
+            for rspecies,ratomtype in Rdata.items():
+                rsettype=set(ratomtype)
+                inters=psettype.intersection(rsettype)
+                uni=psettype.union(rsettype)
+                if (len(inters)/len(uni))>0.75 and psettype.issubset(rsettype): #Similar to Jaccard Index (intersection over union) and ensures that that reactant only takes part
+                    mult={atom: patomtype[atom]/ratomtype[atom] for atom in inters} # Finding stoichiometric multiplier
+                    multcount=dict(sorted(Counter(mult.values()).items(), key=lambda item:item[1],reverse=True))
+                    if len(multcount)<=2 and not [key for key in list(multcount.keys()) if key>list(multcount.keys())[0]] :
+                        similarspecies.add(rspecies)
+        return similarspecies
+                        
+                    
+
     #Reaction parsing
-    for reactant in rxnlib[rxnid]['Reactants']:
+    for rspecies in itertools.chain(rxnlib[rxnid]['Reactants'],rxnlib[rxnid]['Reagents']):
         #Error handling
-        if reactant=='':
-            print('No reactants in reaction. '+ 'Reaction '+rxnid+ ' will be screened out')
+        if rspecies=='':
+            print('No species in reaction. '+ 'Reaction '+rxnid+ ' will be screened out')
             return False
-        elif reactant not in smles.keys():
-            print('Reactant '+reactant+' not in substance dictionary. '+ 'Reaction '+rxnid+ ' will be screened out')
+        elif rspecies not in smles.keys():
+            print('Species '+rspecies+' not in substance dictionary. '+ 'Reaction '+rxnid+ ' will be screened out')
             return False
-        elif ('Carrier Fragment' not in smles[reactant].keys()): #Or if not smles[reactant].get('Carrier Fragment):
-            print('Reactant '+reactant+' is not an analogue compound. '+ 'Reaction '+rxnid+ ' will be screened out')
+        elif ('Carrier Fragment' not in smles[rspecies].keys()): #Or if not smles[reactant].get('Carrier Fragment):
+            print('Species '+rspecies+' is not an analogue compound. '+ 'Reaction '+rxnid+ ' will be screened out')
             return False
         
         #Main code
         
-        rmol=smles[reactant]['Mol']
-        Rdata[reactant]=atomtypes(rmol)[0]
-        Rcount+=Counter(Rdata[reactant])
+        rmol=smles[rspecies]['Mol']
+        Rdata[rspecies]=atomtypes(rmol)[0]
+        Rcount+=Counter(Rdata[rspecies])
         Rcharge+=atomtypes(rmol)[1]
-            
+    
+    MainProd=False
     #Product parsing
     for product in rxnlib[rxnid]['Products']:
         #Error handling
@@ -902,23 +940,30 @@ def isbalanced(rxnid,rxnlib,smles):
             return False
         
         #Main code
+        
         pmol=smles[product]['Mol']
         Pdata[product]=atomtypes(pmol)[0]
+        if sum(Pdata[product].values())>=(0.5*sum(Rcount.values())):
+            MainProd=True
         Pcount+=Counter(Pdata[product])
         Pcharge+=atomtypes(pmol)[1]
     
+    if not MainProd:
+        print('Main product is not present. More than 50 % of reactant atoms are missing. '+'Reaction '+rxnid+ ' will be screened out')
+        return False
+    
     if Rcount==Pcount and Rcharge==Pcharge:
         print('Reaction '+rxnid+ ' is fully balanced')
-        return True  #Same number and type of atoms reactant and product side and same charge ie. perfectly balanced reaction. Include.
+        return True  #Same number and type of atoms reactant and product side and same charge ie. perfectly balanced reaction. Pretty much impossible.
     elif Rcharge!=Pcharge: #Does not deal with charge imbalance yet. Reaction is screened out
         print('Charge is not balanced. ' + 'Reaction '+rxnid+ ' will be screened out')
         return False
-    elif Rcount.keys()!=Pcount.keys(): #Screen out reactions where new atom types are in the product that weren't in reactants. This means reagent/solvent needed
-        print('New atom types introduced in products. Reagents and/or solvents may be coreactants. ' + 'Reaction '+rxnid+ ' will be screened out')
+    elif len(Rcount.keys())<len(Pcount.keys()): #Screen out reactions where new atom types are in the product that weren't in reactants. This means solvent is needed, which is not an analogue compound
+        print('New atom types introduced in products. Other non-analogue species required. ' + 'Reaction '+rxnid+ ' will be screened out')
         return False
     else: #Charge balance is met but not mol balance.Can use new function
         print('Reaction '+rxnid+' needs to be balanced. Initializing...')
-        chempyr={smles[reactant]['Formula'] for reactant in rxnlib[rxnid]['Reactants']}
+        chempyr={smles[rspecies]['Formula'] for rspecies in itertools.chain(rxnlib[rxnid]['Reactants'],rxnlib[rxnid]['Reagents'])}
         chempyp={smles[product]['Formula'] for product in rxnlib[rxnid]['Products']}
         try:
             reac, prod = balance_stoichiometry(chempyr, chempyp) #Try balancing once without adding compounds
@@ -949,28 +994,22 @@ def isbalanced(rxnid,rxnlib,smles):
                 postype={key: rem[key] for key in poskey}
             if negkey:
                 negtype={key: abs(rem[key]) for key in negkey}
-        
-        
-            if not postype: #This means excess molecules only on reactant side. Attempt to add help compounds to product side(one only not combinations)
-                hc_list=[hc for hc in hc_atomtype if hc_atomtype[hc].keys()==negtype.keys()] #Narrow down list of help compounds
-                if hc_list:
-                    for hc in hc_list:
-                        chempyp.add(hc)
-                        try:
-                            reac, prod = balance_stoichiometry(chempyr, chempyp)
-                            if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
-                                raise Exception
-                            else:
-                                print('Reaction '+rxnid+' successfully balanced')
-                                return True,reac,prod
-                        except Exception:
-                            chempyp.remove(hc)
-                            continue
-                print('Help compounds did not help. '+'Reaction '+rxnid+' will still be kept, but there are extra reactant atoms')
-                return True,'Warning'
-            else:
-                for hc in hc_atomtype:
-                    chempyp.add(hc)
+            
+            if postype:
+                similarspecies=checksimilar(Rdata,Pdata)
+                if similarspecies and len(similarspecies)!=len(chempyr):
+                    chempyrs={smles[rspecies]['Formula'] for rspecies in similarspecies}
+                    try:
+                        reac, prod = balance_stoichiometry(chempyrs, chempyp)
+                        if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
+                            raise Exception
+                        else:
+                            print('Reaction '+rxnid+' successfully balanced')
+                            return True,reac,prod
+                    except Exception:
+                        return tryhelp(hc_atomtype,chempyrs,chempyp,rxnid)
+                elif negtype:
+                    chempyp.add(''.join([key if val==1 else key+str(val) for key,val in negtype.items() if val>1]))
                     try:
                         reac, prod = balance_stoichiometry(chempyr, chempyp)
                         if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
@@ -979,11 +1018,15 @@ def isbalanced(rxnid,rxnlib,smles):
                             print('Reaction '+rxnid+' successfully balanced')
                             return True,reac,prod
                     except Exception:
-                        chempyp.remove(hc)
-                        continue
-                print('Reaction '+rxnid+' could not be balanced. Help compounds did not help. '+' Reaction '+rxnid+' will be screened out')
-                return False
-
+                        return tryhelp(hc_atomtype,chempyr,chempyp,rxnid)
+                else:
+                    return tryhelp(hc_atomtype,chempyr,chempyp,rxnid)
+        
+            else: #This means excess molecules only on reactant side. Attempt to add help compounds to product side(one only not combinations)
+                hc_list=[hc for hc in hc_atomtype if hc_atomtype[hc].keys()==negtype.keys()] #Narrow down list of help compounds
+                if hc_list:
+                    return tryhelp(hc_list,chempyr,chempyp,rxnid,keep=True)
+            
 
 #%% Screening based on reaction center (Second cut)
 
