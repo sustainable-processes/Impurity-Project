@@ -119,7 +119,7 @@ def predict_impurities(casenum, visualizeoutput=True):
     
     
     
-    #%% Writing images to file (remove comment if case changes)
+    #%% Writing images to file
     if visualizeoutput:
         sep=os.sep
         directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_Full')
@@ -130,7 +130,7 @@ def predict_impurities(casenum, visualizeoutput=True):
             convSVGtoPNG(os.path.join(directory,rxnid),os.path.join(directory,rxnid))
         
         
-        directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_ReactantOnly')
+        directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_Reactant_Reagent_Only')
         if not os.path.isdir(directory):
             os.makedirs(directory)
         for rxnid in rxnlib.keys():

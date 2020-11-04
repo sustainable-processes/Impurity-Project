@@ -12,19 +12,19 @@ both of which are needed for screening.
 
 @author: E0014
 """
-
-from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickle, getfragments,gethelpfragments,maprxn,rdMolDraw2D,drawReaction,parsemap,get_changed_atoms, os, writetofile,getlist,convSVGtoPNG, balance_stoichiometry,writepickle,json,isbalanced,hc_smilesDict,hc_molDict, valid_rxn_center
+#%%
+from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickle, getfragments,maprxn,rdMolDraw2D,drawReaction,parsemap,get_changed_atoms, os, writetofile,getlist,convSVGtoPNG, balance_stoichiometry,writepickle,json,isbalanced,hc_smilesDict,hc_molDict, valid_rxn_center
 from FindFunctionalGroups import identify_functional_groups as IFG
-import copy
+import copy,itertools
 
-
+#%%
 def screening(casenum):
     sep=os.sep
     inputdir=os.path.join(os.getcwd(),'Input'+sep+casenum)
     rxnlib=openpickle(os.path.join(inputdir,'rxnlib.pickle'))
     smles=openpickle(os.path.join(inputdir,'smles.pickle'))
 
-#%% Building reaction strings and mapping (WITHOUT SCREENING)
+#%% Building reaction strings and mapping (WITHOUT SCREENING AND BALANCING)
 
     for rxnid,rxn in rxnlib.items():
         reacstrl=[] #Empty list of chemicals on reaction LHS
@@ -34,16 +34,18 @@ def screening(casenum):
             reag=getfragments(rxn['Reagents'], smles)
             if reag:
                 reacstrl.append(reag)
+        reacreag=copy.copy(reacstrl)
         if rxn['Solvent'][0]!='':
             solv=getfragments(rxn['Solvent'],smles)
             if solv:
                 reacstrl.append(solv)
-        reacstr='.'.join(reacstrl)
+        reacstrfull='.'.join(reacstrl)
+        reacstr='.'.join(reacreag) #'.'.join(reac) for reactant only
         prodstr=getfragments(rxn['Products'],smles)  #Calls getfragments() to generate reaction string containing products (smiles strings from reference substance dictionary)
-        currrxnstr='{}>>{}'.format(reacstr,prodstr) #reacstr if want to include reagents, solvents 
-        currrxnstr2='{}>>{}'.format(reac,prodstr) #reacstr2 contained just reactants
+        currrxnstr='{}>>{}'.format(reacstrfull,prodstr) #reacstr if want to include reagents, solvents 
+        currrxnstr2='{}>>{}'.format(reacstr,prodstr) #reacstr2 contained just reactants and reagents
         rxn.update({'RSmiles': currrxnstr}) #Updating rxnlib dictionary with smarts string
-        rxn.update({'RSmiles2': currrxnstr2}) #Updating rxnlib dictionary with smarts string (only reactants)
+        rxn.update({'RSmiles2': currrxnstr2}) #Updating rxnlib dictionary with smarts string (only reactants and reagents)
     
     
     # Mapping reactions using IBM Rxn mapper
@@ -52,7 +54,7 @@ def screening(casenum):
     rxnstr=getlist(rxnlib,'RSmiles')
     results4=maprxn(rxnstr)
     
-    # Reactants only
+    # Reactants and reagents only [Can put inside line 93 onwards to prevent unnecessary calculation]
     
     rxnstr2=getlist(rxnlib,'RSmiles2')
     results5=maprxn(rxnstr2)
@@ -71,7 +73,7 @@ def screening(casenum):
         rxn.update({'Mapping Dictionary': res,'Reaction Center': changed_mapidx})
     
     
-    # Reactants only
+    # Reactants and reagents only
     
     for maps,rxn in zip(results5,list(rxnlib.values())):
         curr_rxn2=rdChemReactions.ReactionFromSmarts(maps['mapped_rxn'],useSmiles=True)
@@ -99,18 +101,20 @@ def screening(casenum):
                 
                 for reac,coeff in reacst.items():
                     helpcomp=True
-                    for reactant in rxn['Reactants']:
-                        if smles[reactant]['Formula']==reac:
-                            reaclist.extend([reactant for _ in range(coeff)])
+                    for rspecies in itertools.chain(rxnlib[rxnid]['Reactants'],rxnlib[rxnid]['Reagents']):
+                        if smles[rspecies]['Formula']==reac:
+                            reaclist.extend([rspecies for _ in range(coeff)])
                             helpcomp=False
                    
-                    if helpcomp:
+                    if helpcomp: #Help compound
                         rhelplist.extend([reac for _ in range(coeff)])
                         
                 reacstr=getfragments(reaclist,smles) 
                 if rhelplist:
-                    reacstr=reacstr+'.'+gethelpfragments(rhelplist,hc_smilesDict)
                     rxn.update({'Help Reactants': rhelplist})
+                    if getfragments(rhelplist,hc_smilesDict,helpc=True):
+                        reacstr=reacstr+'.'+getfragments(rhelplist,hc_smilesDict,helpc=True)
+                    
             
                 for prod,coeff in prodst.items():
                     helpcomp=True
@@ -118,16 +122,19 @@ def screening(casenum):
                         if smles[product]['Formula']==prod:
                             prodlist.extend([product for _ in range(coeff)])
                             helpcomp=False
-                    if helpcomp:
+                    if helpcomp: #Either help compound or residue atoms from reactant
                         phelplist.extend([prod for _ in range(coeff)])
                         
                 prodstr=getfragments(prodlist,smles) 
                 if phelplist:
-                    prodstr=prodstr+'.'+gethelpfragments(phelplist,hc_smilesDict)
                     rxn.update({'Help Products': phelplist})
+                    if getfragments(phelplist,hc_smilesDict,helpc=True):
+                        prodstr=prodstr+'.'+getfragments(phelplist,hc_smilesDict,helpc=True)
                 currrxnstr3='{}>>{}'.format(reacstr,prodstr)
                 rxn.update({'Balanced RSmiles': currrxnstr3})
                 rxn.update({'Balanced Reactants': reaclist, 'Balanced Products': prodlist})
+            # else: lines 30 to 48 for final codebase
+                
                 
     # Mapping
     balance_ids=[key for key,rxn in analogue_rxns.items() if 'Balanced RSmiles' in rxn.keys()]
@@ -154,4 +161,4 @@ def screening(casenum):
     
     return rxnlib,smles,analogue_rxns,template_dict
 
-# output=screening('Case1')
+# output=screening('Case2')
