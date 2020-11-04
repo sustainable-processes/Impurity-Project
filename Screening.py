@@ -13,9 +13,9 @@ both of which are needed for screening.
 @author: E0014
 """
 #%%
-from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickle, getfragments,gethelpfragments,maprxn,rdMolDraw2D,drawReaction,parsemap,get_changed_atoms, os, writetofile,getlist,convSVGtoPNG, balance_stoichiometry,writepickle,json,isbalanced,hc_smilesDict,hc_molDict, valid_rxn_center
+from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickle, getfragments,maprxn,rdMolDraw2D,drawReaction,parsemap,get_changed_atoms, os, writetofile,getlist,convSVGtoPNG, balance_stoichiometry,writepickle,json,isbalanced,hc_smilesDict,hc_molDict, valid_rxn_center
 from FindFunctionalGroups import identify_functional_groups as IFG
-import copy
+import copy,itertools
 
 #%%
 def screening(casenum):
@@ -101,18 +101,20 @@ def screening(casenum):
                 
                 for reac,coeff in reacst.items():
                     helpcomp=True
-                    for reactant in rxn['Reactants']:
-                        if smles[reactant]['Formula']==reac:
-                            reaclist.extend([reactant for _ in range(coeff)])
+                    for rspecies in itertools.chain(rxnlib[rxnid]['Reactants'],rxnlib[rxnid]['Reagents']):
+                        if smles[rspecies]['Formula']==reac:
+                            reaclist.extend([rspecies for _ in range(coeff)])
                             helpcomp=False
                    
-                    if helpcomp:
+                    if helpcomp: #Help compound
                         rhelplist.extend([reac for _ in range(coeff)])
                         
                 reacstr=getfragments(reaclist,smles) 
                 if rhelplist:
-                    reacstr=reacstr+'.'+gethelpfragments(rhelplist,hc_smilesDict)
                     rxn.update({'Help Reactants': rhelplist})
+                    if getfragments(rhelplist,hc_smilesDict,helpc=True):
+                        reacstr=reacstr+'.'+getfragments(rhelplist,hc_smilesDict,helpc=True)
+                    
             
                 for prod,coeff in prodst.items():
                     helpcomp=True
@@ -120,13 +122,14 @@ def screening(casenum):
                         if smles[product]['Formula']==prod:
                             prodlist.extend([product for _ in range(coeff)])
                             helpcomp=False
-                    if helpcomp:
+                    if helpcomp: #Either help compound or residue atoms from reactant
                         phelplist.extend([prod for _ in range(coeff)])
                         
                 prodstr=getfragments(prodlist,smles) 
                 if phelplist:
-                    prodstr=prodstr+'.'+gethelpfragments(phelplist,hc_smilesDict)
                     rxn.update({'Help Products': phelplist})
+                    if getfragments(phelplist,hc_smilesDict,helpc=True):
+                        prodstr=prodstr+'.'+getfragments(phelplist,hc_smilesDict,helpc=True)
                 currrxnstr3='{}>>{}'.format(reacstr,prodstr)
                 rxn.update({'Balanced RSmiles': currrxnstr3})
                 rxn.update({'Balanced Reactants': reaclist, 'Balanced Products': prodlist})

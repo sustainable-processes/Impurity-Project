@@ -47,8 +47,8 @@ from ttictoc import tic,toc
 from rdkit.Chem import BRICS #For fragmenting
 from chempy import balance_stoichiometry
 import json
-# import pickle #Default
-import pickle5 as pickle #Only if pickle doesn't work
+import pickle #Default
+# import pickle5 as pickle #Only if pickle doesn't work
 import cairosvg
 import copy, itertools
 from collections import Counter
@@ -368,7 +368,7 @@ def getMols(IDs):
     return mols #Can streamline into the main code   
     
     
-def getfragments(chemlist,refdict):
+def getfragments(chemlist,refdict,helpc=False):
     '''
     Builds reaction smiles string for each chemical (with reaxys ID) in a list given a reference
     dictionary with reaxys ID as keys.
@@ -395,40 +395,43 @@ def getfragments(chemlist,refdict):
             if idx==len(chemlist)-1:
                 frag=frag[:-1]
             continue
-        frag+=refdict[chem]['Smiles']
+        if helpc:
+            frag+=refdict[chem]
+        else:
+            frag+=refdict[chem]['Smiles']
         if idx !=len(chemlist)-1:
             frag+='.'
     return frag
 
-def gethelpfragments(helplist,helpdict):
-    '''
-    Builds reaction smiles string for each chemical (with reaxys ID) in a list given a reference
-    help compound dictionary with reaxys ID as keys.
+# def gethelpfragments(helplist,helpdict):
+#     '''
+#     Builds reaction smiles string for each chemical (with reaxys ID) in a list given a reference
+#     help compound dictionary with reaxys ID as keys.
 
-    Parameters
-    ----------
-    helplist : TYPE
-        DESCRIPTION.
-    helpdict : TYPE
-        DESCRIPTION.
+#     Parameters
+#     ----------
+#     helplist : TYPE
+#         DESCRIPTION.
+#     helpdict : TYPE
+#         DESCRIPTION.
 
-    Returns
-    -------
-    frag : TYPE
-        DESCRIPTION.
+#     Returns
+#     -------
+#     frag : TYPE
+#         DESCRIPTION.
 
-    '''
-    frag=''
-    if helplist==[]:
-        print('ERROR: NO CHEMICALS IN LIST PROVIDED')
-    for idx,hc in enumerate(helplist):
-        if not helpdict[hc]:
-            print('component not in dictionary. Skipping..')
-            continue
-        frag+=helpdict[hc]
-        if idx !=len(helplist)-1:
-            frag+='.'
-    return frag
+#     '''
+#     frag=''
+#     if helplist==[]:
+#         print('ERROR: NO CHEMICALS IN LIST PROVIDED')
+#     for idx,hc in enumerate(helplist):
+#         if not helpdict[hc]:
+#             print('component not in dictionary. Skipping..')
+#             continue
+#         frag+=helpdict[hc]
+#         if idx !=len(helplist)-1:
+#             frag+='.'
+#     return frag
 
 #%% Reaction Center Identification
 
@@ -943,7 +946,7 @@ def isbalanced(rxnid,rxnlib,smles):
         
         pmol=smles[product]['Mol']
         Pdata[product]=atomtypes(pmol)[0]
-        if sum(Pdata[product].values())>=(0.5*sum(Rcount.values())):
+        if sum(Pdata[product].values())>=(0.5*sum(Rcount.values())): #Check if any product is the main product
             MainProd=True
         Pcount+=Counter(Pdata[product])
         Pcharge+=atomtypes(pmol)[1]
@@ -1048,7 +1051,7 @@ def valid_rxn_center(rxnid,analoguerxns,smles):
     reacfragloc={} #This stores mapping numbers and atom indices of carrier fragment atoms within the reactant
     for idx,reactant in enumerate(clean_rxn.GetReactants()):
         rdreactant=rdrxn.GetReactants()[idx]
-        for reacid in rxn['Reactants']:
+        for reacid in itertools.chain(rxn['Reactants'],rxn['Reagents']):
             if smles[reacid]['Smiles']==Chem.MolToSmiles(reactant):
                 carrier_frag=smles[reacid]['Carrier Fragment']
                 break

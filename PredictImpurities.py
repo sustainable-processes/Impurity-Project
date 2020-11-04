@@ -119,7 +119,7 @@ def predict_impurities(casenum, visualizeoutput=True):
     
     
     
-    #%% Writing images to file (remove comment if case changes)
+    #%% Writing images to file
     if visualizeoutput:
         sep=os.sep
         directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_Full')
