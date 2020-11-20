@@ -87,9 +87,10 @@ def screening(casenum):
     #%%Building reaction strings and mapping (WITH SCREENING). RUN ONCE
     
     analogue_rxns={} #To store only screened reaction data with updated reaction string and data
+    error_dict={} #To store error messages and reasons why reactions are screened out 
     for rxnid,rxn in rxnlib.items():
         balance=isbalanced(rxnid,rxnlib,smles)
-        if balance: #Only reactions where isbalance returns something
+        if balance[0]: #Only reactions where isbalance returns something
             analogue_rxns.update({rxnid:rxn}) 
             if type(balance)==tuple and balance[1]!='Warning': #This means reaction has been balanced using chempy, returns tuple
                 reacst=balance[1] # Reactants and stoich coefficients
@@ -133,32 +134,68 @@ def screening(casenum):
                 currrxnstr3='{}>>{}'.format(reacstr,prodstr)
                 rxn.update({'Balanced RSmiles': currrxnstr3})
                 rxn.update({'Balanced Reactants': reaclist, 'Balanced Products': prodlist})
+                if len(currrxnstr3)>512: #If too long, rxnmapper does not work
+                    errormsg='Reaction string too long for mapper'
+                    print(errormsg)
+                    if error_dict:
+                        error_dict.update({rxnid:{'Reason for screen out': errormsg}})
+                    else:
+                        error_dict={rxnid:{'Reason for screen out': errormsg}}
+                    del analogue_rxns[rxnid]
             # else: lines 30 to 48 for final codebase
-                
+        else:
+            errormsg=balance[1]
+            if error_dict:
+                error_dict.update({rxnid:{'Reason for screen out': errormsg}})
+            else:
+                error_dict={rxnid:{'Reason for screen out': errormsg}}
+            if len(balance)>2:
+                error_dict[rxnid].update({'Details': balance[2]})
+    #If all reactions are screened out
+    if not analogue_rxns:
+        return rxnlib,smles,False,False,error_dict            
                 
     # Mapping
     balance_ids=[key for key,rxn in analogue_rxns.items() if 'Balanced RSmiles' in rxn.keys()]
-    rxnstr3=[analogue_rxns[key]['Balanced RSmiles'] for key in balance_ids]
-    results6=maprxn(rxnstr3)
-                    
-    for maps,rxnid in zip(results6,balance_ids):
-        curr_rxn3=rdChemReactions.ReactionFromSmarts(maps['mapped_rxn'],useSmiles=True)
-        curr_rxn3.RemoveUnmappedReactantTemplates()
-        curr_rxndraw3=drawReaction(curr_rxn3)
-        analogue_rxns[rxnid].update({'Balanced Mapping': maps['mapped_rxn'], 'Balanced Confidence': maps['confidence'], 'Balanced RDKit Rxn': curr_rxn3, 'Balanced Sketch': curr_rxndraw3})
-        res3,rmap3=parsemap(curr_rxn3)
-        changed_atoms3, changed_mapidx3=get_changed_atoms(res3) #Works now
-        analogue_rxns[rxnid].update({'Balanced Mapping Dictionary': res3,'Balanced Reaction Center': changed_mapidx3})
+    
+    if balance_ids:
+        rxnstr3=[analogue_rxns[key]['Balanced RSmiles'] for key in balance_ids]
+        results6=maprxn(rxnstr3)
+                        
+        for maps,rxnid in zip(results6,balance_ids):
+            curr_rxn3=rdChemReactions.ReactionFromSmarts(maps['mapped_rxn'],useSmiles=True)
+            curr_rxn3.RemoveUnmappedReactantTemplates()
+            curr_rxndraw3=drawReaction(curr_rxn3)
+            analogue_rxns[rxnid].update({'Balanced Mapping': maps['mapped_rxn'], 'Balanced Confidence': maps['confidence'], 'Balanced RDKit Rxn': curr_rxn3, 'Balanced Sketch': curr_rxndraw3})
+            res3,rmap3=parsemap(curr_rxn3)
+            changed_atoms3, changed_mapidx3=get_changed_atoms(res3) #Works now
+            analogue_rxns[rxnid].update({'Balanced Mapping Dictionary': res3,'Balanced Reaction Center': changed_mapidx3})
         
     #%% Further screening based on reaction center
     template_dict={}
     for rxnid,rxn in analogue_rxns.items():
         valid=valid_rxn_center(rxnid,analogue_rxns,smles)
-        if valid:
+        if valid[0]:
             rxn.update({'Fragment Location': valid[1]})
             rxn.update({'Clean Reaction': valid[2]})
             template_dict.update({rxnid:rxn})
-    
-    return rxnlib,smles,analogue_rxns,template_dict
+        else:
+            errormsg=valid[1]
+            if error_dict:
+                error_dict.update({rxnid:{'Reason for screen out': errormsg}})
+            else:
+                error_dict={rxnid:{'Reason for screen out': errormsg}}
+            if len(valid)>2:
+                error_dict[rxnid].update({'Details':valid[2]})
+        
+    return rxnlib,smles,analogue_rxns,template_dict,error_dict
 
 # output=screening('Case2')
+
+
+
+
+
+
+
+

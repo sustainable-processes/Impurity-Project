@@ -10,7 +10,7 @@ needs candidate_rxns.pkl (generated from upstream workflow) in the working direc
 @author: AADA01
 """
 
-from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickle, getfragments,gethelpfragments,maprxn,rdMolDraw2D,drawReaction,parsemap,get_changed_atoms, os, writetofile,getlist,convSVGtoPNG, balance_stoichiometry,writepickle,json,isbalanced,hc_smilesDict,hc_molDict, valid_rxn_center
+from MainFunctions import getMols, Chem, rdChemReactions,molfromsmiles,openpickle, getfragments,maprxn,rdMolDraw2D,drawReaction,parsemap,get_changed_atoms, os, writetofile,getlist,convSVGtoPNG, balance_stoichiometry,writepickle,json,isbalanced,hc_smilesDict,hc_molDict, valid_rxn_center
 from FindFunctionalGroups import identify_functional_groups as IFG
 #%%
 def processdata(casenum):
