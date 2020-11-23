@@ -48,14 +48,11 @@ from rdkit.Chem import BRICS #For fragmenting
 from chempy import balance_stoichiometry
 import json
 # import pickle #Default
-<<<<<<< HEAD
 import pickle5 as pickle #Only if pickle doesn't work
-=======
 try:
     import pickle5 as pickle #Only if pickle doesn't work
 except Exception:
     import pickle
->>>>>>> 399f3f1bd0be1bca56fcdd4ec17494105853144c
 import cairosvg
 import copy, itertools,shutil
 from collections import Counter
