@@ -1105,7 +1105,7 @@ def isbalanced(rxnid,rxnlib,smles):
 #%% Screening based on reaction center (Second cut)
 
 def get_matches(mol,patt,checkresults=True):
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     matches=mol.GetSubstructMatches(patt)
     if not matches:
         return False,False
