@@ -200,6 +200,8 @@ def visualizeoutput(casenum,rxnlib,analogue_rxns,template_dict,delandreplace=Tru
         directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_Analogue')
         if not os.path.isdir(directory):
             os.makedirs(directory)
+        elif delandreplace==True:
+            delcontents(directory)
         for rxnid in analogue_rxns.keys():
             if 'Balanced Sketch' in analogue_rxns[rxnid].keys():
                 writetofile(analogue_rxns[rxnid]['Balanced Sketch'],os.path.join(directory,rxnid+'.svg'))
