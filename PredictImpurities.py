@@ -172,7 +172,7 @@ def predict_impurities(casenum,datapreprocessingdone=True, screeningdone=False,p
     writepickle(smles,os.path.join(direc,'smles'))
     writepickle(analogue_rxns,os.path.join(direc,'analogue_rxns'))
     writepickle(template_dict,os.path.join(direc,'template_dict'))
-    writepickle(template_dict,os.path.join(direc,'error_dict'))
+    writepickle(error_dict,os.path.join(direc,'error_dict'))
     
     return rxnlib,smles,analogue_rxns,template_dict,error_dict
 
