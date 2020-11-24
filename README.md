@@ -14,7 +14,7 @@ OR
 
 To install dependencies, type the following in anaconda prompt or a compatible IDE:
 
-`conda env create -f environment_windows.yml -n <your-env-name>` if OS is windows
+`conda env create -f environment_win.yml -n <your-env-name>` if OS is windows
 
 OR
 
