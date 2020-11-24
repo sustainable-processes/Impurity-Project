@@ -19,7 +19,7 @@ from DataProcessing import processdata
 from collections import Counter
 
 #%%
-def predict_impurities(casenum,datapreprocessingdone=True, screeningdone=False):
+def predict_impurities(casenum,datapreprocessingdone=True, screeningdone=False,predictiondone=False):
     if not datapreprocessingdone: #ONLY RUN THIS ON SERVER AND SPECIFY DATAPREPROCESSINGDONE AS FALSE
         processdata(casenum)
     sep=os.sep   
@@ -42,12 +42,20 @@ def predict_impurities(casenum,datapreprocessingdone=True, screeningdone=False):
             writepickle(error_dict,os.path.join(direc,'error_dict'))
 
     #%% Reading from screening folder
-    else:
+    elif not predictiondone:
         rxnlib=openpickle(os.path.join(direc,'rxnlib.pickle'))
         smles=openpickle(os.path.join(direc,'smles.pickle'))
         analogue_rxns=openpickle(os.path.join(direc,'analogue_rxns.pickle'))
         template_dict=openpickle(os.path.join(direc,'template_dict.pickle'))
         error_dict=openpickle(os.path.join(direc,'error_dict.pickle'))
+    else:
+        direc=os.path.join(os.getcwd(),'Output_Final'+sep+casenum)
+        rxnlib=openpickle(os.path.join(direc,'rxnlib.pickle'))
+        smles=openpickle(os.path.join(direc,'smles.pickle'))
+        analogue_rxns=openpickle(os.path.join(direc,'analogue_rxns.pickle'))
+        template_dict=openpickle(os.path.join(direc,'template_dict.pickle'))
+        error_dict=openpickle(os.path.join(direc,'error_dict.pickle'))
+        return rxnlib,smles,analogue_rxns,template_dict,error_dict         
 
     #%% Extracting template
     for rxnid,rxn in template_dict.items():
@@ -164,6 +172,7 @@ def predict_impurities(casenum,datapreprocessingdone=True, screeningdone=False):
     writepickle(smles,os.path.join(direc,'smles'))
     writepickle(analogue_rxns,os.path.join(direc,'analogue_rxns'))
     writepickle(template_dict,os.path.join(direc,'template_dict'))
+    writepickle(error_dict,os.path.join(direc,'error_dict'))
     
     return rxnlib,smles,analogue_rxns,template_dict,error_dict
 
@@ -200,6 +209,8 @@ def visualizeoutput(casenum,rxnlib,analogue_rxns,template_dict,delandreplace=Tru
         directory=os.path.join(os.getcwd(),'Images'+sep+casenum+sep+'Sketches_Analogue')
         if not os.path.isdir(directory):
             os.makedirs(directory)
+        elif delandreplace==True:
+            delcontents(directory)
         for rxnid in analogue_rxns.keys():
             if 'Balanced Sketch' in analogue_rxns[rxnid].keys():
                 writetofile(analogue_rxns[rxnid]['Balanced Sketch'],os.path.join(directory,rxnid+'.svg'))
