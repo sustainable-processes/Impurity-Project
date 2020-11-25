@@ -47,8 +47,6 @@ from ttictoc import tic,toc
 from rdkit.Chem import BRICS #For fragmenting
 from chempy import balance_stoichiometry
 import json
-# import pickle #Default
-import pickle5 as pickle #Only if pickle doesn't work
 try:
     import pickle5 as pickle #Only if pickle doesn't work
 except Exception:
