@@ -47,7 +47,8 @@ searching candi_rxns are too slow at this step, because rows are read one by one
 possible solution: using SQL? 
 or multiprocessing, read multiple lines batch by batch 
 and then process using multiple cores
-"""                
+"""     
+rxnSource = '/home/projects/graph/11step_network_774355/zg_good_data_noDupRXID2.dat'           
 keys_Qcomps = list(comp_pools.keys())
 keys_carriFrags = [list(comp_pools[_].keys()) for _ in keys_Qcomps]
 keys_Qcomps_carriFrags = [[(keys_Qcomps[i],_) for _ in keys_carriFrags[i]] for i in range(len(keys_Qcomps))]
