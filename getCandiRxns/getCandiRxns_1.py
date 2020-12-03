@@ -66,10 +66,19 @@ with open(rxnSource, 'r') as infile:
         else:
             rxnRecordslist = rxnRecords.split('\t')
             rxts = rxnRecordslist[1].split(',')
-            rxts = rxts + rxnRecordslist[11].split(',') # <<< include reagents also
+            # rxts = rxts + rxnRecordslist[11].split(',') # <<< include reagents also
+            # reagents will not be checked if they contain carrierfrag or not but
+            # reagents provided by user will be check if they exist in current reaction
+            # unfortunately, if no reagents, there is no ''
+            allReagsIn = all([_ in reags for _ in ReagIDs])
+            # in case important reactions are missed, if number of references higher than certain threshold
+            # here >=5, the reaction will be kept
+            numRef = rxnRecordslist[3] # number of references for this reaction, higher means more reliable
+            if numRef != '': # <<< may possibly got other unexpected string
+                numRef = int(numRef)
             flag, rxts_assign = checkRxts(rxts, comp_pools) 
             # flag: bool; rxts_assign: {'15752734': [(rxt/pro_smi_fromQueryRxn, carr_frag_smi), ...], ...}
-            if flag:
+            if (flag & allReagsIn) | (flag & numRef >=5):
                 candi_rxns = candi_rxns + [rxnRecords]
                 for k1 in rxts_assign.keys():
                     for k2 in rxtsAssigns.keys():
