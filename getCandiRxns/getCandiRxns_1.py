@@ -13,8 +13,12 @@ import copy
 from collections import namedtuple
 from rdkit import Chem
 from rdkit import DataStructs
+import rdkit.Chem.Descriptors
 from rdkit.Chem.Fingerprints import FingerprintMols
 from FindFunctionalGroups import identify_functional_groups as IFG
+import multiprocessing
+from functools import partial
+import gc
 
 
 
@@ -55,6 +59,21 @@ def multiprocessor(func, lsOrArray, numCores, unlist=True, **kwargs):
     return results
 
 def getMols(IDs):
+    '''
+    Retrieves smiles strings from a set of Reaxys IDs using the cambridge server
+    Connect via VPN
+
+    Parameters
+    ----------
+    IDs : List
+        List of Reaxys substance IDs
+
+    Returns
+    -------
+    mols: List
+        List of molecule files
+
+    '''
     str_cwd = os.getcwd()
     os.chdir('/home/projects/graph/data/')
     folderNames = [_ for _ in os.listdir('.') if os.path.isdir(_)] # folder name and IDslist file name with .dat are same 
@@ -242,14 +261,14 @@ def getCompPool(comp, source, fragSize, smiThresh, MwThresh, numCores, addHs=Tru
     for frag in frags:
         # find analogue comps contains frag
         patt_frag = Chem.MolFromSmarts(frag)
-        if len(source) >= 500: # just to determined if multiprocessing is necessary
+        if len(source) >= 500 and numCores!=0: # just to determined if multiprocessing is necessary
             AnaComps = multiprocessor(func=getIDsByFrag_v1, lsOrArray=source, 
                                         numCores=numCores, unlist=True, patt=patt_frag, 
                                         MwThresh=MwThresh, addHs=addHs)
         else:
             AnaComps = getIDsByFrag_v1(source, patt_frag, MwThresh, addHs)
         # keep comps pass smiThresh
-        if len(AnaComps) >=500:
+        if len(AnaComps) >=500 and numCores!=0:
             AnaComps = multiprocessor(func=getSimilarComp, lsOrArray=AnaComps, 
                                                 numCores=numCores, unlist=True, 
                                                 targetComp=comp, thresh=smiThresh, UseCompID=False)
@@ -287,36 +306,6 @@ def checkRxts(rxts, comp_pools):
             return (False, rxtsAssign)
     return (True, rxtsAssign)
 
-
-
-# --- inputs ---
-# -- reaction smiles
-# Case 1 step 4, c1s4:
-rxnSmiles = 'Nc1ccc(O)cc1.CC(=O)OC(C)=O>>CC(=O)Nc1ccc(O)cc1'
-# -- reaction parameters
-
-# generate reaction dict: {'rxts': [rxt_smi, ...], 'pros': [pro_smi, ...]}
-rxts_smi, pros_smi = rxnSmiles.split('>>')
-rxts_smi = rxts_smi.split('.')
-pros_smi = pros_smi.split('.')
-rxn_dict = {'rxts': rxts_smi, 'pros': pros_smi}
-
-"""get analogue compounds"""
-""" <<<< NOTE please make a copy of AllRxtIDs.dat, in case it was overwriten"""
-with open('/home/zg268/py2projects/reaction_1/AllRxtIDs.dat', 'r') as infile:  # toally 7461090 compounds
-    AllRxtIDs = infile.readlines()[0].split(',')
-# number of analogue comps for l1: saved at analComp_aminophenol.pkl
-    # '[#7](-[#6](:[#6]):[#6])(-[H])-[H]': 17128
-    # '[#6]:[#6](:[#6](-[#8]-[H]):[#6](:[#6])-[H])-[H]': 8515
-"""<<< NOTE be careful numCores, recommend 2 for testing, if set 5 may eat up all memo"""
-compPoolRxt_1 =getCompPool(comp=rxn_dict['rxts'][0], source=AllRxtIDs, fragSize=6, smiThresh=0.5, 
-                           MwThresh=300, numCores=2) 
-
-
-
-
-
-
 """ 
 get candidate reactions 
 searching candi_rxns are too slow at this step, because rows are read one by one
@@ -324,44 +313,43 @@ possible solution: using SQL?
 or multiprocessing, read multiple lines batch by batch 
 and then process using multiple cores
 """     
-rxnSource = '/home/projects/graph/11step_network_774355/zg_good_data_noDupRXID2.dat'           
-keys_Qcomps = list(comp_pools.keys())
-keys_carriFrags = [list(comp_pools[_].keys()) for _ in keys_Qcomps]
-keys_Qcomps_carriFrags = [[(keys_Qcomps[i],_) for _ in keys_carriFrags[i]] for i in range(len(keys_Qcomps))]
-keys_Qcomps_carriFrags = [_ for sublist in keys_Qcomps_carriFrags for _ in sublist]
-  
-candi_rxns = []              
-rxtsAssigns = {k: set() for k in keys_Qcomps_carriFrags}  
-# rxtsAssigns: { ('rxt/pro_smi', 'carr_frag_smarts'): ['rxtID', ...], ... }
-with open(rxnSource, 'r') as infile:
-    infile.readline(); infile.readline()
-    while True:
-        rxnRecords = infile.readline()
-        if rxnRecords == '':
-            break
-        else:
-            rxnRecordslist = rxnRecords.split('\t')
-            rxts = rxnRecordslist[1].split(',')
-            # rxts = rxts + rxnRecordslist[11].split(',') # <<< include reagents also
-            # reagents will not be checked if they contain carrierfrag or not but
-            # reagents provided by user will be check if they exist in current reaction
-            # unfortunately, if no reagents, there is no ''
-            allReagsIn = all([_ in reags for _ in ReagIDs])
-            # in case important reactions are missed, if number of references higher than certain threshold
-            # here >=5, the reaction will be kept
-            numRef = rxnRecordslist[3] # number of references for this reaction, higher means more reliable
-            if numRef != '': # <<< may possibly got other unexpected string
-                numRef = int(numRef)
-            flag, rxts_assign = checkRxts(rxts, comp_pools) 
-            # flag: bool; rxts_assign: {'15752734': [(rxt/pro_smi_fromQueryRxn, carr_frag_smi), ...], ...}
-            if (flag & allReagsIn) | (flag & numRef >=5):
-                candi_rxns = candi_rxns + [rxnRecords]
-                for k1 in rxts_assign.keys():
-                    for k2 in rxtsAssigns.keys():
-                        for assign in rxts_assign[k1]:
-                            if assign == k2:
-                                rxtsAssigns[k2].update([k1]) 
-                
+def get_candirxns(comp_pools,inputdir,rxnSource):
+    keys_Qcomps = list(comp_pools.keys())
+    keys_carriFrags = [list(comp_pools[_].keys()) for _ in keys_Qcomps]
+    keys_Qcomps_carriFrags = [[(keys_Qcomps[i],_) for _ in keys_carriFrags[i]] for i in range(len(keys_Qcomps))]
+    keys_Qcomps_carriFrags = [_ for sublist in keys_Qcomps_carriFrags for _ in sublist]
+    candi_rxns = []              
+    rxtsAssigns = {k: set() for k in keys_Qcomps_carriFrags}  
+    # rxtsAssigns: { ('rxt/pro_smi', 'carr_frag_smarts'): ['rxtID', ...], ... }
+    with open(rxnSource, 'r') as infile:
+        infile.readline(); infile.readline()
+        while True:
+            rxnRecords = infile.readline()
+            if rxnRecords == '':
+                break
+            else:
+                rxnRecordslist = rxnRecords.split('\t')
+                rxts = rxnRecordslist[1].split(',')
+                # rxts = rxts + rxnRecordslist[11].split(',') # <<< include reagents also
+                # reagents will not be checked if they contain carrierfrag or not but
+                # reagents provided by user will be check if they exist in current reaction
+                # unfortunately, if no reagents, there is no ''
+                allReagsIn = all([_ in reags for _ in ReagIDs])
+                # in case important reactions are missed, if number of references higher than certain threshold
+                # here >=5, the reaction will be kept
+                numRef = rxnRecordslist[3] # number of references for this reaction, higher means more reliable
+                if numRef != '': # <<< may possibly got other unexpected string
+                    numRef = int(numRef)
+                flag, rxts_assign = checkRxts(rxts, comp_pools) 
+                # flag: bool; rxts_assign: {'15752734': [(rxt/pro_smi_fromQueryRxn, carr_frag_smi), ...], ...}
+                if (flag & allReagsIn) | (flag & numRef >=5):
+                    candi_rxns = candi_rxns + [rxnRecords]
+                    for k1 in rxts_assign.keys():
+                        for k2 in rxtsAssigns.keys():
+                            for assign in rxts_assign[k1]:
+                                if assign == k2:
+                                    rxtsAssigns[k2].update([k1])
+    return candi_rxns, rxtsAssigns
                          
 
 
