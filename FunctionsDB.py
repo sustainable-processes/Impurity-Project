@@ -268,34 +268,25 @@ def getCarrierFrags(smi, size, resFormat='smarts', addHs=True):
         return FGs_strs
     
 #%% Adding fragment smarts column accounting for mixtures
-def getfrags(series,natoms):
-#     smiles=series['Smiles']
-#     if smiles=='Error':
-#         return pd.DataFrame({'FragmentSmarts':['Error'],'FragmentSmiles':['Error']})
-#     if series['>1 Compound']==True: #This compound is a mixture. Need to split and apply getcarrierfrags to each smiles
-#         fragsmarts=getmixturefrags(smiles,natoms)
-#     else:
-#         try:
-#             fragsmarts=getCarrierFrags(smiles,natoms)
-#         except Exception:
-#             return pd.DataFrame({'FragmentSmarts':['Error'],'FragmentSmiles':['Error']})
-#     if type(fragsmarts)==list:
-#         fragsmiles=[getfragsmiles(fragsmart) for fragsmart in fragsmarts]
-#     else:
-#         fragsmiles=getfragsmiles(fragsmarts)
-#     return pd.DataFrame({'FragmentSmarts':[fragsmarts],'FragmentSmiles':[fragsmiles]})
-
+def getfrags(series,expand=1): #natoms changed to expand
     smiles=series['Smiles']
     if smiles=='Error':
-        return 'Error'
+        return 'Error','Error'
     if series['>1 Compound']==True: #This compound is a mixture. Need to split and apply getcarrierfrags to each smiles
-        fragsmarts=getmixturefrags(smiles,natoms)
+        fragsmarts=getmixturefrags(smiles,expand=expand)
+        fragsmiles=getmixturefrags(smiles,expand=expand,resFormat='smiles')
     else:
         try:
-            fragsmarts=getCarrierFrags(smiles,natoms)
+            fragsmarts=getCarrierFrags0(smiles,expand=expand)
+            fragsmiles=getCarrierFrags0(smiles,expand=expand,resFormat='smiles')
         except Exception:
-            return 'Error'
-    return fragsmarts
+            return 'Error','Error'
+    if type(fragsmarts)!=list:
+        fragsmarts=[fragsmarts]
+        fragsmiles=[fragsmiles]
+    
+#     fragsmiles=[Chem.MolToSmiles(Chem.MolFromSmarts(fragsmart)) for fragsmart in fragsmarts] #Does not capture aromaticity
+    return fragsmiles,fragsmarts
         
     
 def getfragpartition(partition,natoms):
@@ -338,11 +329,11 @@ def findMixturespartition(partition):
 
 #%% Changing fragment entries in mixture rows
 
-def getmixturefrags(mixsmiles,natoms,resFormat='smarts', addHs=True): 
+def getmixturefrags(mixsmiles,expand=1,resFormat='smarts', addHs=True): 
     try:
         res=[]
         for smiles in mixsmiles.split('.'):
-            reslist=getCarrierFrags(smiles,natoms,resFormat=resFormat,addHs=addHs)
+            reslist=getCarrierFrags0(smiles,expand=expand,resFormat=resFormat,addHs=addHs)
             if type(reslist)!=list:
                 res+=[reslist]
             else:
@@ -352,12 +343,12 @@ def getmixturefrags(mixsmiles,natoms,resFormat='smarts', addHs=True):
     else:
         return res    
 
-def getMixturefrags(series,natoms):
+def getMixturefrags(series,expand=1):
     mixsmiles=series['Smiles'] # add .values[0] if column is a multiindex, otherwise droplevel = 1 to remove list
-    return getmixturefrags(mixsmiles,natoms)  
+    return getmixturefrags(mixsmiles,expand=expand)  
 
 def getMixturefragspartition(partition,natoms):
-    return partition.apply(getMixturefrags,natoms=natoms,axis=1)
+    return partition.apply(getMixturefrags,expand=expand,axis=1)
 
 # def collapsepartition(partition): #Doesn't work yet. Once exploded it is extremely time-consuming to collapse the dataframe
 #     temp=partition.groupby(['Smiles']).agg([list])
