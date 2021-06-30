@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# %load ./FindFunctionalGroups.py
 """
 Created on Fri Oct  2 14:35:18 2020
 
@@ -19,6 +19,7 @@ Created on Fri Oct  2 14:35:18 2020
 # Guillaume Godin 2017
 # refine output function
 # astex_ifg: identify functional groups a la Ertl, J. Cheminform (2017) 9:36
+
 from rdkit import Chem
 from collections import namedtuple
 

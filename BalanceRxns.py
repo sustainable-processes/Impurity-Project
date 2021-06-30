@@ -4,6 +4,7 @@ from MainFunctions import CustomError,getfragments
 from chempy import balance_stoichiometry
 import copy
 from collections import Counter
+from decimal import Decimal, ROUND_HALF_UP
 
 def buildrxn(Rdata,Pdata):
     '''
@@ -57,65 +58,143 @@ def update_stoich(stoich,compdict,hcID=None,hc_Dict=None):
 
     '''
     usedid=[]
+    formdict={}
+    msg=''   
+    for ID in compdict:
+        form=compdict[ID]['formula']
+        if form not in formdict:
+            formdict.update({form:[ID]})
+        else:
+            formdict[form].extend([ID])
+#     breakpoint()
+    if hcID:
+        if hc_Dict is None:
+            raise CustomError("Please supply help compound reference dictionary/dataframe")
+        for hcid in hcID:
+            form=hc_Dict[hcid]['formula']
+            if form not in formdict:
+                formdict.update({form:[hcid]})
+            else:
+                formdict[form].extend([hcid])
+
     for formula,coeff in stoich.items():
-        assigned=False
-        for ID in compdict:
-            if compdict[ID]['formula']==formula:
+        if formula in formdict:
+            if len(formdict[formula])>1: #Duplicate molecular formula
+                if coeff%len(formdict[formula])==0:
+                    coeff=int(coeff/len(formdict[formula]))
+                else:
+                    msg='Invalid balancing. Duplicate molecular formulae cannot be resolved'
+                    break
+            for ID in formdict[formula]:
+                if ID not in compdict:
+                    compdict.update({ID:hc_Dict[ID]})
                 compdict[ID]['count']=coeff
-                assigned=True
-                usedid+=[ID] #added
-                break
-        if assigned:
-            continue
-        elif hcID:
-            if hc_Dict is None:
-                raise CustomError("Please supply help compound reference dictionary/dataframe")
-            for hcid in hcID:
-                if formula==hc_Dict[hcid]['formula']: 
-                    if hcid not in compdict.keys():
-                        compdict.update({hcid:hc_Dict[hcid]})
-                        compdict[hcid]['count']=coeff
-                        assigned=True
-                        usedid+=[hcid] #added
-                        break
-                    else: #added
-                        compdict[hcid]['count']=coeff
-                        assigned=True
-                        usedid+=[hcid]
-                        break
-        if not assigned:
-            raise CustomError("Formula indicated in stoich outside compound dictionary")
-    valid=True
-    unusedid=set(compdict.keys())-set(usedid) #added
-    if unusedid:
-        for ID in unusedid:
-            if 'rxs_ids' not in compdict[ID]:
-                valid=False
-                break
-        if valid:
-            for ID in unusedid:
-                del compdict[ID]
-    if valid:
-        msg='Valid'
+                usedid+=[ID]
+        else:
+            msg='Invalid balancing. Formula indicated in stoich outside compound dictionary'
+            break
+    if msg:
+        return 'Error',msg
     else:
-        msg='Invalid balancing. Species missing'
-    return compdict,msg
+        valid=True
+        unusedid=set(compdict.keys())-set(usedid)
+        if unusedid:
+            for ID in unusedid:
+                if 'rxs_ids' not in compdict[ID]:
+                    valid=False
+                    break
+            if valid:
+                for ID in unusedid:
+                    del compdict[ID]
+        if valid and compdict:
+            msg='Valid'
+            return compdict,msg
+        else:
+            msg='Invalid balancing. Species missing'
+            return 'Error',msg
+        
+            
+            
+        
+            
+        
+            
+#     for formula,coeff in stoich.items():
+#         assigned=False
+#         for ID in compdict:
+#             if compdict[ID]['formula']==formula:
+#                 compdict[ID]['count']=coeff
+#                 assigned=True
+#                 usedid+=[ID] #added
+#                 break
+#         if assigned:
+#             continue
+#         elif hcID:
+#             if hc_Dict is None:
+#                 raise CustomError("Please supply help compound reference dictionary/dataframe")
+#             for hcid in hcID:
+#                 if formula==hc_Dict[hcid]['formula']: 
+#                     if hcid not in compdict.keys():
+#                         compdict.update({hcid:hc_Dict[hcid]})
+#                         compdict[hcid]['count']=coeff
+#                         assigned=True
+#                         usedid+=[hcid] #added
+#                         break
+#                     else: #added
+#                         compdict[hcid]['count']=coeff
+#                         assigned=True
+#                         usedid+=[hcid]
+#                         break
+#         if not assigned:
+#             raise CustomError("Formula indicated in stoich outside compound dictionary")
+#     valid=True
+#     unusedid=set(compdict.keys())-set(usedid) #added
+#     if unusedid:
+#         for ID in unusedid:
+#             if 'rxs_ids' not in compdict[ID]:
+#                 valid=False
+#                 break
+#         if valid:
+#             for ID in unusedid:
+#                 del compdict[ID]
+#     if valid:
+#         msg='Valid'
+#     else:
+#         msg='Invalid balancing. Species missing'
+#     return compdict,msg
 
 def update_rxn(Rdata,Pdata,reac=None,prod=None,hc_prod=None,hcprod=[],hcrct=[],rxnsmiles0=None,msg=None):
+    stoichupdated=False
     if reac is not None:#Switched order
-        Rdata,addmsgr=update_stoich(reac,Rdata)
+        stoichupdated=True
+        Rdata1,addmsgr=update_stoich(reac,Rdata)
         if addmsgr!='Valid':
             if msg is not None:
                 msg=addmsgr+' from LHS'+', '+msg
             else:
                 msg=addmsgr+' from LHS'
     if prod is not None:
-        Pdata,addmsgp=update_stoich(prod,Pdata,hcID=hcprod,hc_Dict=hc_prod)
+        stoichupdated=True
+        Pdata1,addmsgp=update_stoich(prod,Pdata,hcID=hcprod,hc_Dict=hc_prod)
         if addmsgp!='Valid':
             if msg is not None:
                 msg=addmsgp+' from RHS'+', '+msg
             else:
                 msg=addmsgp+' from RHS'
+    if stoichupdated:
+        if Rdata1!='Error' and Pdata1!='Error':
+            Rdata=Rdata1
+            Pdata=Pdata1
+            try:
+                balrxnsmiles=buildrxn(Rdata,Pdata)
+            except Exception:
+                balrxnsmiles='Error'
+                msg='Invalid balancing. Species missing'+', '+msg
+        else:
+            balrxnsmiles='Error'
+    else:
+        balrxnsmiles=buildrxn(Rdata,Pdata)
+                
     if hcrct:
         LHSids=[ID for ID in Rdata if ID not in hcrct for _ in range(Rdata[ID]['count'])]
     else:
@@ -124,7 +203,7 @@ def update_rxn(Rdata,Pdata,reac=None,prod=None,hc_prod=None,hcprod=[],hcrct=[],r
         RHSids=[ID for ID in Pdata if ID not in hcprod for _ in range(Pdata[ID]['count'])]
     else:
         RHSids=[ID for ID in Pdata for _ in range(int(Pdata[ID]['count']))]
-    balrxnsmiles=buildrxn(Rdata,Pdata)  
+      
     if rxnsmiles0 is not None:
         return rxnsmiles0,balrxnsmiles,msg,LHSids,RHSids,hcrct,hcprod,Rdata,Pdata  #Same number and type of atoms reactant and product side and same charge ie. perfectly balanced reaction. Pretty much impossible.
     else:
@@ -239,17 +318,21 @@ def findmatch(postype,atomdict):
     rem2.update(atomdict)
     rem2.subtract(Counter(postype))
     if any([val<0 for val in rem2.values()]):
-        return False
+        if rem2.keys()==atomdict.keys() and len(set(Counter({k:rem2[k]/atomdict[k] for k in rem2}).values()))==1:
+            return 1.0 #Exact multiple
+        else:
+            return False
     mapprop=1-(sum(rem2.values())/sum(atomdict.values()))
     return round(mapprop,1)
 
-def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
+def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,first=True,
                addedspecies=[],addedhc=[],hc_prod=None,hc_react=None,coefflim=5):
     
     #%% Initialize added species/addedhc
     if first:
         addedspecies=[]
         addedhc=[]
+    ds=[]
     #%% Settle diatomic species (H2,O2 and H2O if present add them as they are probably involved)
     if first and Rgtdata:
         ds=[did for did in Rgtdata if Rgtdata[did]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [1,2]]]
@@ -343,18 +426,36 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
         candirxt=[]
         candirgt=[]
         candihc=[]
+        sortedrgt=[]
+        commonrgt=[]
         matches=[]
         #%% Get reactant match first
         candirxt=[rctid for rctid in Rdata if set(postype.keys()).issubset(set(Rdata[rctid]['atomdict'].keys()))]
         #%% Get reagent match
-        candirgt=[rgtid for rgtid in Rgtdata if set(postype.keys()).issubset(set(Rgtdata[rgtid]['atomdict'].keys()))]
+        candirgt=[rgtid for rgtid in Rgtdata if set(postype.keys()).issubset(set(Rgtdata[rgtid]['atomdict'].keys())) and rgtid not in candirxt]
+#         if ds:
+#             ds=[did for did in ds if did not in candirgt]
+#             candirgt+=ds
+#         breakpoint()
         if candirgt and numrefs is not None and numrefs>1: #Too many references can lead to many reagents being added at the same time (limitation of our method)
-            candihc=[ID for ID in candirgt if Rgtdata[ID]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [0]]] #H2O
+            idealanaloguenum=int(Decimal((1/numrefs)*(len(Rgtid))).to_integral_value(rounding=ROUND_HALF_UP))
+            if idealanaloguenum==0: # This means empty condition record is likely incorrect
+                idealanaloguenum=1
+            if ds:
+                idealanaloguenum=idealanaloguenum-len(ds)
+            commonrgt=[ID for ID,val in Counter(Rgtid).most_common() if val>1 if ID in candirgt if ID in Rgtdata]   
+            candihc=[ID for ID in candirgt if Rgtdata[ID]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [0]] if ID not in commonrgt] #H2O
+            sortedrgt=[ID for ID,val in Counter(Rgtid).most_common() if ID in candirgt if ID in Rgtdata if ID not in commonrgt if ID not in candihc]
 #             candihc=[ID for ID in candirgt if Rgtdata[ID]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [0,1,2]]] #H2, O2, H2O
-            if candihc:
-                candirgt=list(set(candihc+[candirgt[0]]))
+            if len(candihc)+len(commonrgt)>=idealanaloguenum:
+                candirgt=list(set(candihc+commonrgt[:idealanaloguenum]))
             else:
-                candirgt=[candirgt[0]]
+                extrargt=idealanaloguenum-(len(candihc)+len(commonrgt))
+                candirgt=list(set(candihc+commonrgt+sortedrgt[:extrargt]))
+                
+#                 candirgt=list(set(candihc+[candirgt[0]]))
+#             else:
+#                 candirgt=[candirgt[0]]
         #%% Get help compound match
         if hc_react is not None:
             candihc=[hcid for hcid in hc_react if set(postype.keys()).issubset(set(hc_react[hcid]['atomdict'].keys()))]
@@ -364,11 +465,14 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
         if candirxt and not candirgt: #Only reactant matches
             if len(candirxt)>1:
                 matches=[findmatch(postype,Rdata[candi]['atomdict']) for candi in candirxt]
-                if all([match for match in matches]) and len(set(matches))==len(matches): #Means deficit can be made up by all matches and no duplicates  
+                if all(match is not False for match in matches) and len(set(matches))==len(matches): #Means deficit can be made up by all matches and no duplicates  
                     index_max = max(range(len(matches)), key=matches.__getitem__) #Species with maximum atoms mappable
                     candirxt=[candirxt[index_max]]
+                elif 1 in matches:
+                    candirxt=[candirxt[matches.index(1)]]
+                    
             try:
-                if set(candirxt).issubset(set(addedspecies)): #If reactant has been added before, don't bother balancing
+                if set(candirxt).issubset(set(addedspecies)) and not ds: #and not ds #If reactant has been added before, don't bother balancing
                     raise Exception
                 reac,prod,hcid,msg=balance(Rdata,Pdata,hc_prod=hc_prod,coefflim=coefflim,
                                            addedspecies=addedspecies,addedhc=addedhc,hc_react=hc_react)
@@ -376,7 +480,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
                 first=False
                 for candi in candirxt:
                     Rdata[candi]['count']+=1
-                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
+                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
                         first=first,addedspecies=addedspecies+candirxt,addedhc=addedhc,hc_prod=hc_prod,hc_react=hc_react) #Recursion
             else:
                 return update_rxn(Rdata,Pdata,reac=reac,prod=prod,hcprod=hcid,hc_prod=hc_prod,rxnsmiles0=rxnsmiles0,msg=msg)
@@ -384,9 +488,11 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
         elif candirgt and not candirxt:
             if len(candirgt)>1:
                 matches=[findmatch(postype,Rgtdata[candi]['atomdict']) for candi in candirgt]
-                if all([match for match in matches]) and len(set(matches))==len(matches): #Means deficit can be made up by all matches and no duplicates  
+                if all(match is not False for match in matches) and len(set(matches))==len(matches): #Means deficit can be made up by all matches and no duplicates  
                     index_max = max(range(len(matches)), key=matches.__getitem__) #Species with maximum atoms mappable
                     candirgt=[candirgt[index_max]]
+                elif 1 in matches:
+                    candirgt=[candirgt[matches.index(1)]]
                 
             for candi in candirgt:
                 if candi in Rdata.keys():
@@ -395,13 +501,16 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
                     Rdata.update({candi:Rgtdata[candi]})
                 AddedSpecies=candirgt
             try:
+#                 breakpoint()
                 if set(AddedSpecies).issubset(set(addedspecies)):
                     raise Exception
                 reac,prod,hcid,msg=balance(Rdata,Pdata,hc_prod=hc_prod,coefflim=coefflim,
                                           addedspecies=addedspecies+AddedSpecies,addedhc=addedhc,hc_react=hc_react)
+            
             except Exception:
+#                 breakpoint()
                 first=False
-                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
+                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
                         first=first,addedspecies=addedspecies+AddedSpecies,addedhc=addedhc,hc_prod=hc_prod,
                         hc_react=hc_react) #Recursion
             else:
@@ -413,9 +522,12 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
             finalrt.update({candir:Rdata[candir] for candir in set(candirxt)})
             finalrt.update({candirg:Rgtdata[candirg] for candirg in set(candirgt)})
             matches=[findmatch(postype,finalrt[candi]['atomdict']) for candi in finalrt]
-            if all([match for match in matches]) and len(set(matches))==len(matches): #Means deficit can be made up by all matches and no duplicates  
+#             breakpoint()
+            if all(match is not False for match in matches) and len(set(matches))==len(matches): #Means deficit can be made up by all matches and no duplicates  
                 index_max = max(range(len(matches)), key=matches.__getitem__) #Species with maximum atoms mappable
                 finmatch=[list(finalrt.keys())[index_max]]
+            elif 1 in matches:
+                finmatch=[list(finalrt.keys())[matches.index(1)]]
             else:
                 finmatch=list(finalrt.keys())
             for candi in finmatch:
@@ -424,13 +536,13 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
                 else:
                     Rdata.update({candi:Rgtdata[candi]})
             try:
-                if set(finmatch).issubset(set(addedspecies)):
+                if set(finmatch).issubset(set(addedspecies)) and not ds: #and not ds
                     raise Exception
                 reac,prod,hcid,msg=balance(Rdata,Pdata,hc_prod=hc_prod,coefflim=coefflim,
                                           addedspecies=addedspecies+list(finmatch),addedhc=addedhc,hc_react=hc_react)
             except Exception:
                 first=False
-                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
+                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
                                 first=first,addedspecies=addedspecies+list(finmatch),addedhc=addedhc,hc_prod=hc_prod,
                                 hc_react=hc_react) #Recursion
             else:
@@ -449,7 +561,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},rxnsmiles0=None,numrefs=None,first=True,
                                            addedspecies=addedspecies,addedhc=addedhc+candihc,hc_react=hc_react)
             except Exception:
                 first=False
-                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
+                return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
                         first=first,addedspecies=addedspecies,addedhc=addedhc+candihc,hc_prod=hc_prod,
                         hc_react=hc_react) #Recursion
             else:
@@ -488,11 +600,14 @@ def balance_analogue(row,basic=True,balance=True,coefflim=5): #More reliable
     Rdata={}
     Pdata={}
     Rgtdata={}
+    Rgtid=[]
     hc_prod={}
     hc_react={}
     Rdata=copy.deepcopy(row['Rdata'])
     Pdata=copy.deepcopy(row['Pdata'])
     Rgtdata=copy.deepcopy(row['Rgtdata'])
+    if row['ReagentID']!='NaN':
+        Rgtid=copy.deepcopy(row['ReagentID'])
     hc_prod=copy.deepcopy(row['hc_prod'])
     hc_react=copy.deepcopy(row['hc_react'])
     numrefs=row['NumRefs']
@@ -511,6 +626,6 @@ def balance_analogue(row,basic=True,balance=True,coefflim=5): #More reliable
     if basic and not balance:
         return rxnsmiles0,list(Rdata.keys()),list(Pdata.keys())
     else:
-        return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,numrefs=numrefs,coefflim=coefflim,
+        return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,coefflim=coefflim,
                       hc_prod=hc_prod,hc_react=hc_react)
                      

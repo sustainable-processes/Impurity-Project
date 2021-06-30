@@ -3,6 +3,7 @@ import copy,itertools
 from rdkit import Chem
 from MainFunctions import molfromsmiles
 from rdkit.Chem import rdChemReactions
+from rdkit.Chem import Descriptors
 
 def gen_template_row(row):
     LHSdata=copy.deepcopy(row.LHSdata)
@@ -15,6 +16,7 @@ def gen_template(LHSdata,RHSdata,res,nofg=[]): #Don't add invalid reactions here
     reacfrag=[]
     prodfrag=[]
     farfg=[]
+    unusedprod=[]
     for analoguecompd in LHSdata:
         if analoguecompd in nofg and not LHSdata[analoguecompd]['reacfrag'] : #Hydrogen will not be mapped and won't show up in reaction center 
             reacfrag+=[Chem.MolToSmarts(molfromsmiles(mappedsmiles)) for mappedsmiles in LHSdata[analoguecompd]['mappedsmiles']]
@@ -51,17 +53,24 @@ def gen_template(LHSdata,RHSdata,res,nofg=[]): #Don't add invalid reactions here
                             break
         
     for prodid in RHSdata:
-        if 'rxnatomidx' not in RHSdata[prodid].keys(): #H2 product
+        if 'rxnatomidx' not in RHSdata[prodid].keys() and RHSdata[prodid]['formula']=='H2': #H2 product
             prodfrag+=[Chem.MolToSmarts(molfromsmiles(mappedsmiles)) for mappedsmiles in RHSdata[prodid]['mappedsmiles']]
+            continue
+        elif 'rxnatomidx' not in RHSdata[prodid].keys(): #SUSPECT
+            unusedprod+=[prodid]
             continue
         for inst,prodatomidx in RHSdata[prodid]['rxnatomidx'].items():
             prodfrag+=[Chem.MolFragmentToSmarts(molfromsmiles(RHSdata[prodid]['mappedsmiles'][inst]),prodatomidx)]
+    addstr=[]
     if farfg:
-        msg4='Reacting functional groups are too far away in '+'species '+', '.join([str(rctid) for rctid in farfg])
-    else:
+        addstr.append('Reacting functional groups are too far away in '+'species '+', '.join([str(rctid) for rctid in farfg]))
+    if unusedprod:
+        addstr.append('Product '+', '.join([str(ID) for ID in unusedprod])+'is not produced from reacting fragments')
+    if not addstr:
         msg4='Valid'
-    
-    return '>>'.join(['.'.join(reacfrag),'.'.join(prodfrag)]),LHSdata,RHSdata,msg4,farfg
+    else:
+        msg4=', '.join(addstr)
+    return '>>'.join(['.'.join(reacfrag),'.'.join(prodfrag)]),LHSdata,RHSdata,msg4,farfg,unusedprod
 
 def apply_template_row(row,inputquery):
     LHSdata=copy.deepcopy(row.LHSdata)
@@ -78,7 +87,7 @@ def apply_template(LHSdata,templt,inputquery,nofg=[]):
     imp_Rsmiles=[]
     msg5=''
     
-    template_rxn=rdChemReactions.ReactionFromSmarts(templt,useSmiles=True)
+    template_rxn=rdChemReactions.ReactionFromSmarts(templt,useSmiles=False)
     querycompdbin=[]
     for analoguecompd in LHSdata:
         if analoguecompd in nofg and not LHSdata[analoguecompd]['reacfrag'] : #Hydrogen will not be mapped and won't show up in reaction center 
@@ -111,14 +120,31 @@ def apply_template(LHSdata,templt,inputquery,nofg=[]):
 #     breakpoint()
     imp_smles=[tuple(tuple(Chem.MolToSmiles(imp) for imp in imp_prod) for imp_prod in comb) for comb in imp_raw]
     imp_smles=[{imp_prod for imp_prod in comb} for comb in imp_smles] # Remove duplicates
-    try:
-        imp_mol=[{tuple(molfromsmiles(impsmles) for impsmles in impset) for impset in comb} for comb in imp_smles]
-    except Exception as e:
+    combs2=[] #Check chemical validity--only add chemically valid combinations
+    comb2=set()
+    imp_smles2=[]
+    for idx,comb in enumerate(imp_smles):
+        comb2=set()
+        for imp_prod in comb:
+            try:
+                imp_mol={tuple(molfromsmiles(imp) for imp in imp_prod)}
+                comb2.add(imp_prod)
+            except Exception as e:
+                continue
+        if comb2:
+            imp_smles2+=[comb2]
+            combs2+=[combs[idx]]
+    if not imp_smles2:
         msg5='Impurities not chemically valid'
         return combs,imp_smles,'Error',msg5
-    imp_Rsmiles=[set('>>'.join(['.'.join(combs[idx]),'.'.join(impprod)]) for impprod in imp_smles[idx]) for idx in range(len(imp_smles))]
+#     try:
+#         imp_mol=[{tuple(molfromsmiles(impsmles) for impsmles in impset) for impset in comb} for comb in imp_smles]
+#     except Exception as e:
+#         msg5='Impurities not chemically valid'
+#         return combs,imp_smles,'Error',msg5
+    imp_Rsmiles=[set('>>'.join(['.'.join(combs2[idx]),'.'.join(impprod)]) for impprod in imp_smles2[idx]) for idx in range(len(imp_smles2))]
     msg5='Valid'
-    return combs,imp_smles,imp_Rsmiles,msg5
+    return combs2,imp_smles2,imp_Rsmiles,msg5
 
 def removeduplicates(row):
     rejidx=[]
@@ -147,19 +173,29 @@ def removeduplicates(row):
 
     return querycompds,impurities,impurityrxns
 
+def addconditions(row,db):
+    ID=row.name
+    dat=pd.read_sql_query('''SELECT ReactionID,ReagentID,Temperature,Pressure,ResidenceTime,SolventID,CatalystID from ReactionDB Where ReactionID=  "'''+ str(ID) + '''"''',db)
+    dat.set_index('ReactionID',inplace=True)
+    return dat
+
+
 # Removing unrealistic impurities (atoms and query compounds)
-def validimpurities(row,candirxnsimpfinal,analoguerxns,hc_prod,querycompds):
+def validimpurities(row,candirxnsimpfinal,conditions,hc_prod,querycompds):
     impset=copy.deepcopy(set(row.impurities))
     ID=row.name
     if candirxnsimpfinal.loc[ID].hcprod:
         impset=impset-set([hc_prod[hcid]['smiles'] for hcid in candirxnsimpfinal.loc[ID].hcprod])
     if all([imp in row.querycompds for imp in impset]):
         return 'No transformation of interest'
-    if all([imp in querycompds for imp in impset]):
+    elif (conditions.loc[ID].ReagentID.values[0]=='NaN' or conditions.loc[ID].ReagentID.values[0] is None) and (conditions.loc[ID].SolventID.values[0]=='NaN' or conditions.loc[ID].SolventID.values[0] is None) and (conditions.loc[ID].CatalystID.values[0]=='NaN' or conditions.loc[ID].CatalystID.values[0] is None) and conditions.loc[ID].Temperature.values[0] is None and conditions.loc[ID].Pressure.values[0] is None and conditions.loc[ID].ResidenceTime.values[0] is None:
+        return 'No reaction conditions detected. Check reaction record to verify plausibility'
+    elif all([imp in querycompds for imp in impset]):
         return 'Query compounds suggested as impurities'
-    elif all(['[' in imp[0] and ']' in imp[-1] for imp in impset]):
+    elif any([Descriptors.NumRadicalElectrons(Chem.MolFromSmiles(imp))>0 for imp in impset]):
+#     elif any(['[' in imp[0] and ']' in imp[-1] for imp in impset]):
         return 'Impurities are atoms/radicals'
-    elif (len(set(row.querycompds))==1 and (analoguerxns.loc[ID].ReagentID=='NaN' or analoguerxns.loc[ID].ReagentID is None)) or (len(set(candirxnsimpfinal.loc[ID].LHS))==1 and (analoguerxns.loc[ID].ReagentID=='NaN' or analoguerxns.loc[ID].ReagentID is None)):
+    elif (len(set(row.querycompds))==1 and (conditions.loc[ID].ReagentID.values[0]=='NaN' or conditions.loc[ID].ReagentID.values[0] is None)) or (len(set(candirxnsimpfinal.loc[ID].LHS))==1 and (conditions.loc[ID].ReagentID.values[0]=='NaN' or conditions.loc[ID].ReagentID.values[0] is None)):
         return 'Self-reaction/single reactant detected with no reagents. Check reaction record to verify plausibility.'
     else:
         return 'Valid'

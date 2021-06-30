@@ -221,11 +221,12 @@ def get_matches(mol,patt,checkresults=True):
     if not matches:
         return False,False
     elif checkresults:
+#         breakpoint()
         funcgroupmol=IFG(mol) #Functional groups of RDKit reactant
         funcgrouppatt=IFG(patt) #Functional groups of carrier fragment
         funcids=set() #Store functional groups that are of the same type as the carrier fragment
         for funcgroup in funcgrouppatt:
-            matchtype=[molgroup for molgroup in funcgroupmol if molgroup.atoms==funcgroup.atoms]
+            matchtype=[molgroup for molgroup in funcgroupmol if molgroup.type==funcgroup.type] #change to .atoms if not working
             for molgroup in matchtype:
                 if not any([atoms_are_different(mol.GetAtomWithIdx(atomid),patt.GetAtomWithIdx(pattid),usesmarts=False) 
                             for atomid,pattid in zip(molgroup.atomIds,funcgroup.atomIds)]): #BUGGY
@@ -248,11 +249,13 @@ def validrxncenterrow(row,fragdict):
     return validrxncenter(res,rxncenter,LHSdata,fragdict) 
 
 def validrxncenter(res,rxncenter,LHSdata,fragdict):
+#     breakpoint()
     RC=copy.copy(rxncenter)
     nofg=[] #Species with no functional groups
     noanalogue=[] #Species that don't have correct/desired functional group
     outfrag=[] #Species not directly involved in the reaction at carrier fragments
     outfg={} #Species not directly involved in the reaction at functional group
+    outneighbor={} #Species not involved at a neighboring atom to a functional group
 #     unused=[] #Species not directly involved in the reaction
 #     extratom=[] #Species involved at functional group but reacts at other atoms outside as well
     for analoguecompd in LHSdata:
@@ -265,7 +268,9 @@ def validrxncenter(res,rxncenter,LHSdata,fragdict):
 #             continue
             matched=False
             for carrierfrag in LHSdata[analoguecompd]['querycompds']:
-                patt=fragdict[carrierfrag][0].mol
+                patt=Chem.MolFromSmiles(fragdict[carrierfrag][0].smiles,sanitize=False)
+                patt.UpdatePropertyCache(strict=False)
+#                 patt=fragdict[carrierfrag][0].mol
                 if analoguecompd in nofg: #Compound has no active fragment/functional group (including dihydrogen)
                     corr_matches=get_matches(cleanmol,patt,checkresults=False)
                     corr_matches=[match for match in corr_matches]
@@ -289,21 +294,31 @@ def validrxncenter(res,rxncenter,LHSdata,fragdict):
         
     unusedanalogue={analoguecompd for analoguecompd in LHSdata}
     for changemapnum in RC:
+#         breakpoint()
         assigned=False
 #         reacfrag={}
         fg=False
+        nb=False
         rctid=res[changemapnum][0]
         ridx=res[changemapnum][1]
         idxr=res[changemapnum][2]
+        rctmol=molfromsmiles(LHSdata[rctid]['mappedsmiles'][ridx])
+        neidx=[atom.GetIdx() for atom in rctmol.GetAtomWithIdx(idxr).GetNeighbors()]
         reacfrag=LHSdata[rctid]['reacfrag']
+        unusedanalogue-={rctid}
         
         for carrierfrag,loc in LHSdata[rctid]['fragloc'][ridx].items():
             for matchidx,corrmatch in enumerate(loc['corrmatches']):
+#                 breakpoint()
                 if {idxr}.issubset(corrmatch):
                     if {idxr}.issubset(loc['funcgroupids'][matchidx]):
                         fg=True #changed atom lies within functional group
-                    if rctid in unusedanalogue:
-                        unusedanalogue-={rctid}
+                        nb=True #To bypass neighbor check
+                    # New code for neighbors
+                    else:
+                        if any([atomidx in loc['funcgroupids'][matchidx] for atomidx in neidx]):
+                            nb=True
+                    if ridx not in reacfrag:
                         reacfrag.update({ridx:{carrierfrag:[matchidx]}})
                     else: #already initialized
                         if ridx in reacfrag:
@@ -324,7 +339,15 @@ def validrxncenter(res,rxncenter,LHSdata,fragdict):
                 outfg.update({rctid:[changemapnum]})
             else:
                 outfg[rctid].extend([changemapnum])
-   
+        if not nb and (rctid not in noanalogue) and (rctid not in nofg): #changed atom neighbors functional groups
+            if rctid not in outneighbor:
+                outneighbor.update({rctid:[changemapnum]})
+            else:
+                outneighbor[rctid].extend([changemapnum])
+    #%% New (SUSPECT)
+    if unusedanalogue: #Reactants not involved in the reaction
+        unusedanalogue={ID for ID in unusedanalogue if LHSdata[ID]['formula']!='H2'}
+    #%% New
     addstr=[]
     if nofg:
         addstr.append("No functional groups in "+'species '+', '.join([str(ID) for ID in nofg]))
@@ -334,11 +357,13 @@ def validrxncenter(res,rxncenter,LHSdata,fragdict):
         addstr.append('Species '+', '.join([str(ID) for ID in outfrag])+' not reacting at carrier fragment')
     if outfg:
         addstr.append('Species '+', '.join([str(ID) for ID in outfg])+' not reacting at functional group')
+    if unusedanalogue:
+        addstr.append('Species '+', '.join([str(ID) for ID in unusedanalogue])+' does not participate in reaction')
     if not addstr:
         msg='Valid'
     else:
         msg=', '.join(addstr)
-    return LHSdata,msg,nofg,noanalogue,outfrag,outfg
+    return LHSdata,msg,nofg,noanalogue,outfrag,outfg,outneighbor,unusedanalogue
         
 
           

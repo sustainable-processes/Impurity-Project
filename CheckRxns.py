@@ -16,7 +16,7 @@ def checkrxn(mappedrxn,LHSdata=OrderedDict({}),RHSdata=OrderedDict({}),Rdata=Non
     rdrxn=rdChemReactions.ReactionFromSmarts(mappedrxn,useSmiles=True)
     cleanrxn=copy.copy(rdrxn)
     rdChemReactions.RemoveMappingNumbersFromReactions(cleanrxn)
-    rmixtures=[ID for ID in Rdata if len(Rdata[ID]['smiles'].split('.'))>1]
+    rmixtures=[ID for ID in Rdata if len(Rdata[ID]['smiles'].split('.'))>1] # sUSPECT
     pmixtures=[ID for ID in Pdata if len(Pdata[ID]['smiles'].split('.'))>1]
     msg=''
     if rmixtures:
@@ -30,11 +30,14 @@ def checkrxn(mappedrxn,LHSdata=OrderedDict({}),RHSdata=OrderedDict({}),Rdata=Non
         return LHSdata,RHSdata,msg
     else:
         msg+='Valid'
-
+    
+    unusedrct=[ID for ID in Rdata for _ in range(Rdata[ID]['count'])]
+    unusedprod=[ID for ID in Pdata for _ in range(Pdata[ID]['count'])]
     for ID,rct in enumerate(cleanrxn.GetReactants()):
         rctsmiles=Chem.MolToSmiles(rct)
         for ID0 in Rdata:
-            if Rdata[ID0]['smiles']==rctsmiles:
+            if Rdata[ID0]['smiles']==rctsmiles and ID0 in unusedrct:
+                unusedrct.remove(ID0)
                 if ID0 in LHSdata.keys():
                     LHSdata[ID0]['mappedsmiles'].extend([Chem.MolToSmiles(rdrxn.GetReactants()[ID])])
                     LHSdata[ID0]['cleanmol'].extend([rct])
@@ -46,7 +49,8 @@ def checkrxn(mappedrxn,LHSdata=OrderedDict({}),RHSdata=OrderedDict({}),Rdata=Non
     for ID,prod in enumerate(cleanrxn.GetProducts()):
         prodsmiles=Chem.MolToSmiles(prod)
         for ID0 in Pdata:
-            if Pdata[ID0]['smiles']==prodsmiles:
+            if Pdata[ID0]['smiles']==prodsmiles and ID0 in unusedprod:
+                unusedprod.remove(ID0)
                 if ID0 in RHSdata.keys():
                     RHSdata[ID0]['mappedsmiles'].extend([Chem.MolToSmiles(rdrxn.GetProducts()[ID])])
                     RHSdata[ID0]['cleanmol'].extend([prod])
@@ -58,17 +62,17 @@ def checkrxn(mappedrxn,LHSdata=OrderedDict({}),RHSdata=OrderedDict({}),Rdata=Non
     return LHSdata,RHSdata,msg
 
 
-def assignfragsrow(row,querydict,natoms):
+def assignfragsrow(row,querydict,expand=1):
     LHSdata=row.LHSdata
-    return assignfrags(LHSdata,querydict,natoms)
-def assignfrags(LHSdata,querydict,natoms):
+    return assignfrags(LHSdata,querydict,expand=expand)
+def assignfrags(LHSdata,querydict,expand=1):
     fragdata=copy.deepcopy(LHSdata)
     nonanalogue=[]
     for rctid in LHSdata:
-        analgfrags=getCarrierFrags(fragdata[rctid]['smiles'],natoms)
+        analgfrags=getCarrierFrags0(fragdata[rctid]['smiles'],expand=expand,resFormat='smiles')
         if type(analgfrags)==str:
             analgfrags=[analgfrags]
-        commonfrags=set([Chem.MolToSmiles(Chem.MolFromSmarts(fragsmarts)) for fragsmarts in analgfrags]).intersection(set(querydict.keys()))
+        commonfrags=set(analgfrags).intersection(set(querydict.keys()))
         if not commonfrags:    
             nonanalogue+=[rctid]
             continue

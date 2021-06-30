@@ -9,7 +9,7 @@ from rdkit.Chem.Descriptors import MolWt
 from MainFunctions import molfromsmiles,CustomError,mol_with_atom_index
 import sqlite3
 import pandas as pd
-from FunctionsDB import getmixturefrags,getCarrierFrags,mixtures,joindf,getfragsmiles
+from FunctionsDB import getmixturefrags,getCarrierFrags,getCarrierFrags0,mixtures,joindf,getfragsmiles
 from rdkit.Chem.Fingerprints import FingerprintMols
 from rdkit import DataStructs
 import ray
@@ -22,7 +22,8 @@ def getCompPool(DB,fragmentsmiles,SQL=False): #For sql to work, must specify db 
     if not SQL:
         return DB.xs(fragmentsmiles)
     else:
-        sql3='''SELECT SubstanceID,Smiles,">1 Compound",FragmentSmarts from FragmentDB Where FragmentSmiles= "'''+ fragmentsmiles + '''"'''
+#         sql3='''SELECT SubstanceID,Smiles,">1 Compound",FragmentSmarts from FragmentDB Where FragmentSmiles= "'''+ fragmentsmiles + '''"'''
+        sql3='''SELECT SubstanceID,Smiles,">1 Compound",count from FragmentDB1 Where FragmentSmiles= "'''+ fragmentsmiles + '''"'''
         dat=pd.read_sql_query(sql3,DB)
         dat.set_index('SubstanceID',inplace=True)
         return dat 
@@ -82,11 +83,11 @@ def getSim(partition,target):
 #%% Classes
         
 class queryrxn:
-    def __init__(self,inputsmiles=None,species=None,fragsize=6,client=None,FragDB=None,SQL=False,modinray=True,MWThresh=300,SimThresh=0.5):
+    def __init__(self,inputsmiles=None,species=None,fragexpand=1,client=None,FragDB=None,SQL=False,modinray=True,MWThresh=300,SimThresh=0.5):
         '''
         input smiles: Smiles of reaction
         species: All species involved in the reaction (should be either compound or querycompd class)
-        fragsize: Only fragsize=6 works at the moment as FragDB has fragments of this size
+        fragexpand: Only fragexpand works at the moment as FragDB1 has fragments of this size
         client: Distributed client for parallel procesing. If defined, analogue compound lists will be further filtered
         based on molecular weight and similarity
         FragDB: Fragment database for grouping analogue compounds containing the same fragment
@@ -99,8 +100,8 @@ class queryrxn:
             DESCRIPTION. The default is None.
         species : TYPE, optional
             DESCRIPTION. The default is None.
-        fragsize : TYPE, optional
-            DESCRIPTION. The default is 6.
+        fragexpand : TYPE, optional
+            DESCRIPTION. The default is 1.
         client : TYPE, optional
             DESCRIPTION. The default is None.
         FragDB : TYPE, optional
@@ -129,12 +130,12 @@ class queryrxn:
             self.smiles=inputsmiles
             if not type(inputsmiles)==str:
                 raise CustomError("Please input a reaction smiles string. Include '>>' even if no products are inputted")
-            self.species=self.SpeciesList(fragsize=fragsize,client=client,FragDB=FragDB,SQL=SQL,modinray=modinray,MWThresh=MWThresh,SimThresh=SimThresh)
+            self.species=self.SpeciesList(fragexpand=fragexpand,client=client,FragDB=FragDB,SQL=SQL,modinray=modinray,MWThresh=MWThresh,SimThresh=SimThresh)
         elif species is not None:
             self.species=species
         self.speciesdict=self.SpeciesDict(self.species)
             
-    def SpeciesList(self,fragsize=6,client=None,FragDB=None,SQL=False,modinray=True,MWThresh=300,SimThresh=0.5):
+    def SpeciesList(self,fragexpand=1,client=None,FragDB=None,SQL=False,modinray=True,MWThresh=300,SimThresh=0.5):
         specieslist=[]
         splitrxn=self.smiles.split('>>')
         if len(splitrxn)==1: #Only reactants specified
@@ -143,9 +144,9 @@ class queryrxn:
         else:
             rcts=set(splitrxn[0].split('.'))
             prods=set(splitrxn[1].split('.'))
-        specieslist+=[querycompd(Type='rct',smiles=rct,verifysmiles=True,fragsize=fragsize,client=client,FragDB=FragDB,SQL=SQL,
+        specieslist+=[querycompd(Type='rct',smiles=rct,verifysmiles=True,fragexpand=fragexpand,client=client,FragDB=FragDB,SQL=SQL,
                     modinray=modinray,MWThresh=MWThresh,SimThresh=SimThresh) for rct in rcts]
-        specieslist+=[querycompd(Type='prod',smiles=prod,verifysmiles=True,fragsize=fragsize,client=client,FragDB=FragDB,SQL=SQL,
+        specieslist+=[querycompd(Type='prod',smiles=prod,verifysmiles=True,fragexpand=fragexpand,client=client,FragDB=FragDB,SQL=SQL,
                     modinray=modinray,MWThresh=MWThresh,SimThresh=SimThresh) for prod in prods]
         return specieslist
 
@@ -163,14 +164,25 @@ class compound:
                 formula=None):
         if Type:
             self.type=Type
-        if smiles:
+        if smiles and smarts:
+            if verifysmiles:
+                self.smiles=Chem.MolToSmiles(molfromsmiles(smiles))
+            else:
+                self.smiles=smiles
+            if verifysmarts:
+                self.smarts=Chem.MolToSmarts(Chem.MolFromSmarts(smarts))
+            else:
+                self.smarts=smarts
+            self.mol=self.MolFromSmarts()
+               
+        elif smiles:
             if verifysmiles:
                 self.smiles=Chem.MolToSmiles(molfromsmiles(smiles))
             else:
                 self.smiles=smiles
             self.mol=self.MolFromSmiles()
             self.smarts=Chem.MolToSmarts(self.mol)
-        if smarts:
+        elif smarts:
             if verifysmarts:
                 self.smarts=Chem.MolToSmarts(Chem.MolFromSmarts(smarts))
             else:
@@ -252,40 +264,41 @@ class querycompd(compound):
     fragment information.
     
     '''
-    def __init__(self,count=1,fragments=None,fragsize=6,client=None,FragDB=None,SQL=False,modinray=True,MWThresh=300,SimThresh=0.5,**kwargs):
+    def __init__(self,count=1,fragments=None,fragexpand=1,client=None,FragDB=None,SQL=False,modinray=True,MWThresh=300,SimThresh=0.5,**kwargs):
         super(querycompd,self).__init__(**kwargs)
         self.count=count
         if fragments is not None:
             self.frags=fragments
         else:
-            self.frags=self.FragsList(fragsize,FragDB=FragDB,SQL=SQL,client=client,modinray=modinray,MWThresh=MWThresh,SimThresh=SimThresh)
+            self.frags=self.FragsList(fragexpand,FragDB=FragDB,SQL=SQL,client=client,modinray=modinray,MWThresh=MWThresh,SimThresh=SimThresh)
         self.fragsdict=self.FragsDict(self.frags)
             
-    def Frags(self, fragsize, resFormat='smarts', addHs=True):
+    def Frags(self, fragexpand, resFormat='smiles', addHs=True):
         '''
         Returns fragments of a specified size
         '''
         if self.Mixtures():
-            return getmixturefrags(self.smiles,fragsize,resFormat=resFormat,addHs=addHs)
+            return getmixturefrags(self.smiles,fragexpand,resFormat=resFormat,addHs=addHs)
         else:
-            return getCarrierFrags(self.smiles,fragsize,resFormat=resFormat,addHs=addHs)
+            return getCarrierFrags0(self.smiles,fragexpand,resFormat=resFormat,addHs=addHs)
     
-    def FragsList(self,fragsize,FragDB=None,SQL=False,client=None,modinray=True,MWThresh=300,SimThresh=0.5):
+    def FragsList(self,fragexpand,FragDB=None,SQL=False,client=None,modinray=True,MWThresh=300,SimThresh=0.5):
         '''
         Builds a list of fragment objects. If there are repeated fragments, keeps a count
         
         '''
         fragdict={}
-        frags=self.Frags(fragsize)
+        frags=self.Frags(fragexpand)
         if type(frags)!=list:
             frags=[frags]
-        for frag in frags:
-            fragsmiles=getfragsmiles(frag)
+        for fragsmiles in frags:
+            fragsmarts=Chem.MolToSmarts(Chem.MolFromSmiles(fragsmiles,sanitize=False))
+#             fragsmiles=getfragsmiles(frag)
             if fragsmiles in fragdict.keys():
                 fragdict[fragsmiles][1]+=1
             else:
-                fragdict.update({fragsmiles:[frag,1]})
-        return [fragment(parent_instance=self,count=fragdict[fragsmiles][1],smarts=fragdict[fragsmiles][0],FragDB=FragDB,SQL=SQL,
+                fragdict.update({fragsmiles:[fragsmarts,1]})
+        return [fragment(parent_instance=self,count=fragdict[fragsmiles][1],smiles=fragsmiles,smarts=fragdict[fragsmiles][0],FragDB=FragDB,SQL=SQL,
                          client=client,modinray=modinray,MWThresh=MWThresh,SimThresh=SimThresh) for fragsmiles in fragdict]
         
     def FragsDict(self,fragslist):
@@ -341,8 +354,8 @@ class fragment(compound):
         '''
 
         comppool=getCompPool(FragDB,self.smiles,SQL=SQL) #Database needs to be multiindexed at fragment smiles and substance ID
-        comppool['Count']=comppool.groupby([comppool.index])['Smiles'].transform('count')
-        comppool=comppool[~comppool.index.duplicated(keep='first')]
+#         comppool['Count']=comppool.groupby([comppool.index])['Smiles'].transform('count')
+#         comppool=comppool[~comppool.index.duplicated(keep='first')]
         if modinray: #This means modin+ ray is chosen
             pool=mpd.DataFrame(comppool)
             molwt=pool.apply(MWCompd,axis=1,result_type='reduce')
@@ -373,4 +386,7 @@ class fragment(compound):
             return self.comppool.loc[self.comppool['Similarity']>=SimThresh]
         elif MWThresh and SimThresh:
             return self.comppool.loc[(self.comppool['Similarity']>=SimThresh) & (self.comppool['MolWt']<=MWThresh)] 
+        
+
+
             

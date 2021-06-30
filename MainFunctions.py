@@ -101,7 +101,7 @@ def drawReaction(rxn):
         moveAtomMapsToNotes(m)
     # if filetype=='svg':
 #     d2d = rdMolDraw2D.MolDraw2DSVG(4000,500)
-    d2d=rdMolDraw2D.MolDraw2DSVG(1000,500)
+    d2d=rdMolDraw2D.MolDraw2DSVG(1000,300)
     # else:
     #     d2d=rdMolDraw2D.MolDraw2DCairo(4000,500)
 
