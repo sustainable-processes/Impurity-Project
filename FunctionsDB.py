@@ -70,7 +70,7 @@ def substancedblist(folderName, partitions):
 
 
 #%% Fragment detection
-def getCarrierFrags0(smi,expand=1,resFormat='smarts',addHs=True):
+def getCarrierFrags0(smi,expand=1,userinput='smiles',resFormat='smarts',addHs=True):
     """
     str (smiles), int -> list (str_smiles/smarts) 
     smi: str, smiles of a compound
@@ -85,9 +85,12 @@ def getCarrierFrags0(smi,expand=1,resFormat='smarts',addHs=True):
     2) if IFG list empty meaning no functional groups, directly return compound smiles
     3) expand to nearest neighbors based on expand value
     """
-    mol = Chem.MolFromSmiles(smi)
-    Chem.SanitizeMol(mol)
-    mol.UpdatePropertyCache(strict=False)
+    if userinput=='smiles':
+        mol = Chem.MolFromSmiles(smi)
+        Chem.SanitizeMol(mol)
+        mol.UpdatePropertyCache(strict=False)
+    else:
+        mol=smi
     if addHs:
         mol = Chem.AddHs(mol)
     # -- get the list of functional groups FG
@@ -96,9 +99,15 @@ def getCarrierFrags0(smi,expand=1,resFormat='smarts',addHs=True):
     # if IFG_ls is empty, directly return this compounds
     if len(IFG_ls) == 0:
         if resFormat == 'smiles':
-            return smi
+            if userinput!='smiles':
+                return Chem.MolToSmiles(mol)
+            else:
+                return smi
         elif resFormat == 'smarts':
-            return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
+            if userinput!='smiles':
+                return Chem.MolToSmarts(mol)
+            else:
+                return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
     # -- get atomIDs (FGs_atomIDs_expan) and terminalAtomIDs (FGs_terminal_atomIDs) for all frags
     FGs_atomIDs = [_.atomIds for _ in IFG_ls]  # e.g., [(1, 4, 7), ...]
     n_FGs = len(FGs_atomIDs)
@@ -143,9 +152,15 @@ def getCarrierFrags0(smi,expand=1,resFormat='smarts',addHs=True):
 #     breakpoint()
     if len(FGs_terminal_atomIDs[0]) == 0:
         if resFormat == 'smiles':
-            return smi
+            if userinput!='smiles':
+                return Chem.MolToSmiles(mol)
+            else:
+                return smi
         elif resFormat == 'smarts':
-            return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
+            if userinput!='smiles':
+                return Chem.MolToSmarts(mol)
+            else:
+                return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
     else:
         FGs_strs = []  # smiles or smarts
         for FG_atomIDs in FGs_atomIDs_expan:
