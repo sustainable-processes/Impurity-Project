@@ -210,7 +210,7 @@ def update_rxn(Rdata,Pdata,reac=None,prod=None,hc_prod=None,hcprod=[],hcrct=[],r
         return balrxnsmiles,msg,LHSids,RHSids,hcrct,hcprod,Rdata,Pdata
     
                 
-def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=5):
+def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=6):
     '''
     Attempts to balance reaction with addition of help compounds in helpCompounds.py
 
@@ -237,7 +237,8 @@ def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=5):
     lim=len(hc_atomtype)
     keylist=[hcid for hcid in hc_atomtype]
     counter=0
-    while any([idx>=coefflim for tup in zip(reac.values(),prod.values()) for idx in tup]) or not reac:
+    invalid=True
+    while any([idx>coefflim for tup in zip(reac.values(),prod.values()) for idx in tup]) or not reac or invalid:
         if counter>lim-1:
             print('Help compounds did not help. Extra reactant atoms')
             raise CustomError("Help compounds unable to balance") 
@@ -248,8 +249,10 @@ def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=5):
         try:
             reac, prod = balance_stoichiometry(chempyr, chempyp,underdetermined=None,allow_duplicates=True)
             if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
+                invalid=True
                 raise Exception
             else:
+                invalid=False
                 counter+=1
                 continue
         except Exception:
@@ -258,7 +261,8 @@ def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=5):
     print('Reaction successfully balanced')
     return reac,prod,[hcid]    
 
-def balance(Rdata,Pdata,hc_prod=None,balbefore=True,coefflim=5,addedspecies=None,addedhc=None,hc_react=None):
+def balance(Rdata,Pdata,hc_prod={},balbefore=True,coefflim=6,addedspecies=[],addedhc=[],hc_react={}):
+#     breakpoint()
     chempyr={Rdata[ID]['formula'] for ID in Rdata for _ in range(Rdata[ID]['count'])}
     chempyp={Pdata[ID]['formula'] for ID in Pdata for _ in range(Pdata[ID]['count'])} 
     highcoeff=False
@@ -276,18 +280,19 @@ def balance(Rdata,Pdata,hc_prod=None,balbefore=True,coefflim=5,addedspecies=None
             addedstr=addedstr2
     msg+=addedstr
     
-    if balbefore or hc_prod is None: #Either user has indicated that first pass at balancing needs to be done or fails to specify help compounds
+    if balbefore or not hc_prod: #Either user has indicated that first pass at balancing needs to be done or fails to specify help compounds
         try:
             reac, prod = balance_stoichiometry(chempyr, chempyp,underdetermined=None,allow_duplicates=True) #Try balancing once without adding compounds
-            if any([idx>=coefflim for tup in zip(reac.values(),prod.values()) for idx in tup]):
+            if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
+                raise Exception
+            elif any([idx>coefflim for tup in zip(reac.values(),prod.values()) for idx in tup]):
                 reac0=copy.copy(reac)
                 prod0=copy.copy(prod)
                 highcoeff=True
                 raise Exception
-            elif any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
-                raise Exception
+ 
         except Exception as e:
-            if hc_prod is None: #User has not supplied help compounds
+            if not hc_prod: #User has not supplied help compounds
                 if highcoeff:
                     return reac0,prod0,None,'Warning. Coeffs high'
                 else:
@@ -296,7 +301,7 @@ def balance(Rdata,Pdata,hc_prod=None,balbefore=True,coefflim=5,addedspecies=None
         else: #Reaction successfully balanced
             return reac,prod,None,msg
             
-    if hc_prod is not None: #Can try help compounds
+    if hc_prod: #Can try help compounds
         try:
             reac,prod,hcid=tryhelp(hc_prod,chempyr,chempyp,coefflim=coefflim)
         except Exception as e:
@@ -325,8 +330,8 @@ def findmatch(postype,atomdict):
     mapprop=1-(sum(rem2.values())/sum(atomdict.values()))
     return round(mapprop,1)
 
-def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,first=True,
-               addedspecies=[],addedhc=[],hc_prod=None,hc_react=None,coefflim=5):
+def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],Solvdata={},rxnsmiles0=None,numrefs=None,first=True,
+               addedspecies=[],addedhc=[],hc_prod={},hc_react={},coefflim=5,singleworkflow=True):
     
     #%% Initialize added species/addedhc
     if first:
@@ -334,12 +339,14 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
         addedhc=[]
     ds=[]
     #%% Settle diatomic species (H2,O2 and H2O if present add them as they are probably involved)
-    if first and Rgtdata:
-        ds=[did for did in Rgtdata if Rgtdata[did]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [1,2]]]
+    if first and Rgtdata and hc_react:
+        ds=[did for did in Rgtdata if Rgtdata[did]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [2,3]]]
 #         ds=[did for did in Rgtdata if Rgtdata[did]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [0,1,2]]]
         if ds:
             Rdata.update({did:Rgtdata[did] for did in ds})
             addedspecies+=ds
+    if Solvdata:
+        Rgtdata={**Rgtdata,**Solvdata} #Newly added
         
     Rcount=sum([Counter(Rdata[ID]['atomdict']) for ID in Rdata for _ in range(Rdata[ID]['count'])],start=Counter()) #Sum of atom counts/types on LHS
     Rcharge=sum([Rdata[ID]['charge'] for ID in Rdata for _ in range(Rdata[ID]['count'])])
@@ -419,7 +426,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
 #     breakpoint()
     
     if postype: #Reactants, Reagents may be needed (postype or (postype and negtype))
-        if hc_prod is not None:
+        if hc_prod:
             if Rcharge==Pcharge:
                 hc_prod={hcid:hc_prod[hcid] for hcid in hc_prod if hc_prod[hcid]['charge']==0} #Atom type for help compounds
         #%% Initializing variables
@@ -433,18 +440,15 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
         candirxt=[rctid for rctid in Rdata if set(postype.keys()).issubset(set(Rdata[rctid]['atomdict'].keys()))]
         #%% Get reagent match
         candirgt=[rgtid for rgtid in Rgtdata if set(postype.keys()).issubset(set(Rgtdata[rgtid]['atomdict'].keys())) and rgtid not in candirxt]
-#         if ds:
-#             ds=[did for did in ds if did not in candirgt]
-#             candirgt+=ds
-#         breakpoint()
-        if candirgt and numrefs is not None and numrefs>1: #Too many references can lead to many reagents being added at the same time (limitation of our method)
+
+        if candirgt and numrefs is not None and numrefs>1 and not singleworkflow: #Too many references can lead to many reagents being added at the same time (limitation of our method)
             idealanaloguenum=int(Decimal((1/numrefs)*(len(Rgtid))).to_integral_value(rounding=ROUND_HALF_UP))
             if idealanaloguenum==0: # This means empty condition record is likely incorrect
                 idealanaloguenum=1
             if ds:
                 idealanaloguenum=idealanaloguenum-len(ds)
             commonrgt=[ID for ID,val in Counter(Rgtid).most_common() if val>1 if ID in candirgt if ID in Rgtdata]   
-            candihc=[ID for ID in candirgt if Rgtdata[ID]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [0]] if ID not in commonrgt] #H2O
+            candihc=[ID for ID in candirgt if Rgtdata[ID]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [1]] if ID not in commonrgt] #H2O
             sortedrgt=[ID for ID,val in Counter(Rgtid).most_common() if ID in candirgt if ID in Rgtdata if ID not in commonrgt if ID not in candihc]
 #             candihc=[ID for ID in candirgt if Rgtdata[ID]['smiles'] in [hc_react[hcid]['smiles'] for hcid in [0,1,2]]] #H2, O2, H2O
             if len(candihc)+len(commonrgt)>=idealanaloguenum:
@@ -457,7 +461,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
 #             else:
 #                 candirgt=[candirgt[0]]
         #%% Get help compound match
-        if hc_react is not None:
+        if hc_react:
             candihc=[hcid for hcid in hc_react if set(postype.keys()).issubset(set(hc_react[hcid]['atomdict'].keys()))]
             
 #         breakpoint() 
@@ -481,7 +485,8 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
                 for candi in candirxt:
                     Rdata[candi]['count']+=1
                 return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
-                        first=first,addedspecies=addedspecies+candirxt,addedhc=addedhc,hc_prod=hc_prod,hc_react=hc_react) #Recursion
+                        first=first,addedspecies=addedspecies+candirxt,addedhc=addedhc,hc_prod=hc_prod,hc_react=hc_react,
+                        coefflim=coefflim,singleworkflow=singleworkflow) #Recursion
             else:
                 return update_rxn(Rdata,Pdata,reac=reac,prod=prod,hcprod=hcid,hc_prod=hc_prod,rxnsmiles0=rxnsmiles0,msg=msg)
             
@@ -512,7 +517,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
                 first=False
                 return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
                         first=first,addedspecies=addedspecies+AddedSpecies,addedhc=addedhc,hc_prod=hc_prod,
-                        hc_react=hc_react) #Recursion
+                        hc_react=hc_react,coefflim=coefflim,singleworkflow=singleworkflow) #Recursion
             else:
                 return update_rxn(Rdata,Pdata,reac=reac,prod=prod,hcprod=hcid,hc_prod=hc_prod,rxnsmiles0=rxnsmiles0,msg=msg)
         
@@ -544,7 +549,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
                 first=False
                 return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
                                 first=first,addedspecies=addedspecies+list(finmatch),addedhc=addedhc,hc_prod=hc_prod,
-                                hc_react=hc_react) #Recursion
+                                hc_react=hc_react,coefflim=coefflim,singleworkflow=singleworkflow) #Recursion
             else:
                 return update_rxn(Rdata,Pdata,reac=reac,prod=prod,hcprod=hcid,hc_prod=hc_prod,rxnsmiles0=rxnsmiles0,msg=msg)
                 
@@ -563,7 +568,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
                 first=False
                 return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
                         first=first,addedspecies=addedspecies,addedhc=addedhc+candihc,hc_prod=hc_prod,
-                        hc_react=hc_react) #Recursion
+                        hc_react=hc_react,coefflim=coefflim,singleworkflow=singleworkflow) #Recursion
             else:
                 return update_rxn(Rdata,Pdata,reac=reac,prod=prod,hcprod=hcid,hc_prod=hc_prod,hcrct=addedhc+candihc,
                                   rxnsmiles0=rxnsmiles0,msg=msg)
@@ -594,12 +599,36 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Rgtid=[],rxnsmiles0=None,numrefs=None,firs
                 return update_rxn(Rdata,Pdata,reac=reac,prod=prod,hcprod=hcid,hc_prod=hc_prod2,hcrct=addedhc,rxnsmiles0=rxnsmiles0,
                                  msg=msg)
         else:
-            return update_rxn(Rdata,Pdata,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg='Imbalanced'+addedstr) 
+            return update_rxn(Rdata,Pdata,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg='Imbalanced'+addedstr)
 
-def balance_analogue(row,basic=True,balance=True,coefflim=5): #More reliable
+from MainFunctions import getcompdict,molfromsmiles
+from rdkit import Chem #Importing RDKit
+def balance_rxn(rxnsmiles0,hc_prod=None,hc_react=None,coefflim=5):
+#     breakpoint()
+    try:
+        splitrxn=rxnsmiles0.split('>>')
+        if len(splitrxn)==1: #Only reactants specified
+            raise Exception
+        rcts=set(splitrxn[0].split('.'))
+        prods=set(splitrxn[1].split('.'))
+        rcts=[Chem.MolToSmiles(molfromsmiles(rct)) for rct in rcts]
+        prods=[Chem.MolToSmiles(molfromsmiles(prod)) for prod in prods]
+    except Exception:
+        print('Please supply valid reaction smiles. Reactant.Reactant >> Product.Product')
+    Rdata={}
+    Pdata={}
+    for i,rct in enumerate(rcts):
+        Rdata.update(getcompdict(ID=i,smiles=rct))
+    for j,prod in enumerate(prods):
+        Pdata.update(getcompdict(ID=j,smiles=prod))
+    return balancerxn(Rdata,Pdata,rxnsmiles0=rxnsmiles0,hc_prod=hc_prod,hc_react=hc_react,coefflim=coefflim)
+
+
+def balance_analogue(row,basic=True,balance=True,coefflim=5,singleworkflow=True,includesolv=False,helpprod=True,helpreact=True): #More reliable
     Rdata={}
     Pdata={}
     Rgtdata={}
+    Solvdata={}
     Rgtid=[]
     hc_prod={}
     hc_react={}
@@ -608,8 +637,12 @@ def balance_analogue(row,basic=True,balance=True,coefflim=5): #More reliable
     Rgtdata=copy.deepcopy(row['Rgtdata'])
     if row['ReagentID']!='NaN':
         Rgtid=copy.deepcopy(row['ReagentID'])
-    hc_prod=copy.deepcopy(row['hc_prod'])
-    hc_react=copy.deepcopy(row['hc_react'])
+    if helpprod:
+        hc_prod=copy.deepcopy(row['hc_prod'])
+    if helpreact:
+        hc_react=copy.deepcopy(row['hc_react'])
+    if includesolv:
+        Solvdata=copy.deepcopy(row['Solvdata'])
     numrefs=row['NumRefs']
     if type(Rdata)!=dict: #Error or compound invalid
         if basic and balance:
@@ -626,6 +659,7 @@ def balance_analogue(row,basic=True,balance=True,coefflim=5): #More reliable
     if basic and not balance:
         return rxnsmiles0,list(Rdata.keys()),list(Pdata.keys())
     else:
-        return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,rxnsmiles0=rxnsmiles0,numrefs=numrefs,coefflim=coefflim,
-                      hc_prod=hc_prod,hc_react=hc_react)
+#         breakpoint()
+        return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Rgtid=Rgtid,Solvdata=Solvdata,rxnsmiles0=rxnsmiles0,numrefs=numrefs,
+                          coefflim=coefflim,hc_prod=hc_prod,hc_react=hc_react,singleworkflow=singleworkflow)
                      

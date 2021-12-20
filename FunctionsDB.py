@@ -126,7 +126,7 @@ def getCarrierFrags0(smi,expand=1,userinput='smiles',resFormat='smarts',addHs=Tr
             neis_IDs = [_.GetIdx() for _ in mol.GetAtomWithIdx(atomID).GetNeighbors()]
             if len(set(neis_IDs) - set(FG_atomIDs)) != 0:
                 FG_terminal_atomIDs = FG_terminal_atomIDs + [atomID]
-        if len(FG_terminal_atomIDs) == 0:
+        if (expand==0) | (len(FG_terminal_atomIDs) == 0):
             # make sure all elements in FGs_atomIDs_expan are lists
             FGs_atomIDs_expan[i] = FG_atomIDs
             FGs_terminal_atomIDs[i] = FG_terminal_atomIDs
