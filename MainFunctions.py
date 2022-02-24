@@ -1,3 +1,4 @@
+# %load ./MainFunctions.py
 from rdkit import Chem #Importing RDKit
 from rdkit.Chem import Draw #For drawing molecules/reactions
 from rdkit.Chem import rdChemReactions #Reaction processing
@@ -12,8 +13,8 @@ except Exception:
     import pickle
 import cairosvg
 import shutil
-from rxnmapper import RXNMapper #Importing RXNMapper for unsupervised atom mapping
 from rdkit.Chem import PeriodicTable, GetPeriodicTable
+from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
 #%% Generating mol files
 
@@ -102,6 +103,7 @@ def drawReaction(rxn):
     # if filetype=='svg':
 #     d2d = rdMolDraw2D.MolDraw2DSVG(4000,500)
     d2d=rdMolDraw2D.MolDraw2DSVG(1000,300)
+#     d2d.drawOptions().minFontSize = 20
     # else:
     #     d2d=rdMolDraw2D.MolDraw2DCairo(4000,500)
 
@@ -279,43 +281,6 @@ def convSVGtoPNG(filename, filenameout):
     '''
     cairosvg.svg2png(url=filename+".svg", write_to=filenameout+".png")
 
-#%% Reaction Mapping
-
-def maprxn(rxns):
-    """
-    For a given list of reactions, rxns, returns mapped reactions with confidence scores.
-    Uses IBM transformer model.
-
-    Parameters
-    ----------
-    rxns : list
-        List of reaction SMILES (no reactant/reagent split)
-
-    Returns
-    -------
-    Output : list
-        Mapped reactions with confidence scores
-           
-           mapped_rxn: str
-               Mapped reaction SMARTS
-             
-           confidence: str
-               Model confidence in the mapping rxn
-                   
-    ['Error']: list
-        If code doesn't run or mapper doesn't work
-    """
-
-    rxn_mapper=RXNMapper()
-    try:
-        return rxn_mapper.get_attention_guided_atom_maps(rxns)
-    except Exception:
-        return ['Error']
-    
-    
-    
-
-
 #%% Analyzing mol files
 
 def atomtypes(mol):
@@ -347,8 +312,6 @@ def atomtypes(mol):
         else:
             typedict[elem]+=1
     return typedict, charge
-
-
 
 def getcompdict(ID=1,mol=None,smiles=None,formula=None,FragDB=None):
     '''
@@ -402,7 +365,7 @@ def getcompdict(ID=1,mol=None,smiles=None,formula=None,FragDB=None):
         except Exception as e:
             raise CustomError("Compound "+str(ID)+" smiles is invalid")
     if formula is None:
-        formula=Chem.rdMolDescriptors.CalcMolFormula(mol)
+        formula=CalcMolFormula(mol)
     atomdata=atomtypes(mol)
     compddict={ID:{'atomdict':atomdata[0],'charge':atomdata[1],'smiles':smiles,'formula':formula,'count':1}}
     return compddict
@@ -481,4 +444,3 @@ def getfragments(chemlist,smiles=False,ref=None):
             raise CustomError('One or more compounds missing from database')
         else:
             return frag
-        
