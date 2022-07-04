@@ -1,6 +1,9 @@
 # %load ./BalanceRxns.py
 import rdkit
 from MainFunctions import CustomError,getfragments, getcompdict, molfromsmiles
+import multiprocessing
+import time
+# from func_timeout import func_timeout, FunctionTimedOut
 from chempy import balance_stoichiometry
 import copy
 from collections import Counter
@@ -9,48 +12,60 @@ from rdkit import Chem #Importing RDKit
 from rdkit.Chem import rdChemReactions #Reaction processing
 # from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 from MapRxns import maprxn
+from math import ceil
 
 
-def balance_analogue_(analoguerxns,refbalrxns=None,coefflim=6,reaxys_update=True,includesolv=False,
-                     usemapper=True,helpprod=True,helpreact=True,ncpus=16):
+def balance_analogue_(analoguerxns,refbalrxns=None,coefflim=6,reaxys_update=True,includesolv=True,
+                     usemapper=True,helpprod=True,helpreact=False,addrctonly=False,ignoreH=False,ncpus=16,restart=True):
     '''
     Applies balance_analogue across each row of a given dataframe
     
     '''
 #     breakpoint()
-    index=analoguerxns.index.name
-    if index and index!='ReactionID':
-        analoguerxns.reset_index(inplace=True).set_index('ReactionID',inplace=True)
-    if refbalrxns is not None:
-        if index:
-            commonids=set(refbalrxns.ReactionID).intersection(set(analoguerxns.index))
-            commondf=refbalrxns[refbalrxns.ReactionID.isin(commonids)]
-            analoguerxns=analoguerxns[~analoguerxns.index.isin(commonids)]
-        else:
-            commonids=set(refbalrxns.ReactionID).intersection(set(analoguerxns.ReactionID))
-            commondf=refbalrxns[refbalrxns.ReactionID.isin(commonids)]
-            analoguerxns=analoguerxns[~analoguerxns.ReactionID.isin(commonids)]
-        if analoguerxns.empty: #All reactions found
-            return commondf
-    initray(num_cpus=ncpus)
-    analoguerxnsdis=mpd.DataFrame(analoguerxns)
-    balrxns=analoguerxnsdis.apply(balance_analogue,coefflim=6,includesolv=includesolv,usemapper=usemapper,
-                               helpprod=helpprod,helpreact=helpreact,axis=1,result_type='reduce')
-    balrxns=pd.Series(data=balrxns.values,index=balrxns.index) #Optional convert modin back to pandas
-    analoguerxnsbal=pd.DataFrame(balrxns,columns=['rxnsmiles'])
-    analoguerxnsbal[['rxnsmiles0', 'balrxnsmiles','msg','LHS','RHS','hcrct','hcprod','LHSdata','RHSdata']] = pd.DataFrame(analoguerxnsbal['rxnsmiles'].tolist(), index=analoguerxnsbal.index)
-    if reaxys_update:
-        analoguerxnsbal[['ReactionID','NumRefs','NumSteps','NumStages']]=analoguerxns[['ReactionID','NumRefs','NumSteps','NumStages']]
-        cols=['ReactionID','NumRefs','NumSteps','NumStages','rxnsmiles0','balrxnsmiles','msg','LHS','RHS','hcrct','hcprod','LHSdata','RHSdata']
-        analoguerxnsbal=analoguerxnsbal[cols]
+    if not analoguerxns.index.name and not analoguerxns.index.names:
+        idxreset=True
     else:
-        analoguerxnsbal[['NumRefs','NumSteps']]=analoguerxns[['NumRefs','NumSteps']]
-        cols=['NumRefs','NumSteps','rxnsmiles0','balrxnsmiles','msg','LHS','RHS','hcrct','hcprod','LHSdata','RHSdata']
-        analoguerxnsbal=analoguerxnsbal[cols]  
+        idxreset=False
+    idxcol=[]
+    if reaxys_update:
+        idxcol=['ReactionID','Instance']
+    else:
+        idxcol=['ReactionID']
+    if refbalrxns is not None:
+        analoguerxns,commondf=userefrxns(analoguerxns,idxcol=idxcol,refanaloguerxns=refbalrxns)
+        idxreset=False
+    if not analoguerxns.empty:
+        if ncpus>1:
+            if restart:
+                initray(num_cpus=ncpus)
+            if not idxreset:
+                analoguerxns.reset_index(inplace=True)
+                idxreset=True
+            analoguerxnsdis=mpd.DataFrame(analoguerxns)
+        else:
+            analoguerxnsdis=analoguerxns
+        balrxns=analoguerxnsdis.apply(balance_analogue,coefflim=6,includesolv=includesolv,usemapper=usemapper,
+                                   helpprod=helpprod,helpreact=helpreact,addrctonly=addrctonly,ignoreH=ignoreH,axis=1,result_type='reduce')
+        balrxns=pd.Series(data=balrxns.values,index=balrxns.index) #Optional convert modin back to pandas
+        analoguerxnsbal=pd.DataFrame(balrxns,columns=['rxnsmiles'])
+        analoguerxnsbal[['rxnsmiles0', 'balrxnsmiles','msg','LHS','RHS','hcrct','hcprod','LHSdata','RHSdata']] = pd.DataFrame(analoguerxnsbal['rxnsmiles'].tolist(), index=analoguerxnsbal.index)
+        analoguerxnsbal[['NumRefs','NumSteps','NumStages']]=analoguerxns[['NumRefs','NumSteps','NumStages']]
+        cols=['NumRefs','NumSteps','NumStages','rxnsmiles0','balrxnsmiles','msg','LHS','RHS','hcrct','hcprod','LHSdata','RHSdata']
+        if idxreset:
+            analoguerxnsbal[idxcol]=analoguerxns[idxcol]
+            cols=idxcol+cols
+        analoguerxnsbal=analoguerxnsbal[cols]
+        if idxreset:
+            analoguerxnsbal.set_index(idxcol,inplace=True)
+        if refbalrxns and not commondf.empty: #Indices need to match!
+            analoguerxnsbal=pd.concat([analoguerxnsbal,commondf])
+    else:
+        analoguerxnsbal=commondf
+        balrxns=[]
     return balrxns,analoguerxnsbal
 
-def balance_analogue(row,basic=True,balance=True,coefflim=6,includesolv=False,
-                     usemapper=True,helpprod=True,helpreact=True): #More reliable
+def balance_analogue(row,basic=True,balance=True,coefflim=6,includesolv=True,
+                     usemapper=True,helpprod=True,helpreact=False,addrctonly=False,ignoreH=False): #More reliable
     '''
     Applies balancerxn function across a given dataframe row
     
@@ -91,10 +106,12 @@ def balance_analogue(row,basic=True,balance=True,coefflim=6,includesolv=False,
     else:
 #         return False
 #         breakpoint()
-        return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Solvdata=Solvdata,rxnsmiles0=rxnsmiles0,usemapper=usemapper,coefflim=coefflim,hc_prod=hc_prod,hc_react=hc_react)
+        return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,Solvdata=Solvdata,rxnsmiles0=rxnsmiles0,usemapper=usemapper,
+                          coefflim=coefflim,hc_prod=hc_prod,hc_react=hc_react,addrctonly=addrctonly,ignoreH=ignoreH)
 
-def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,usemapper=False,
-               addedspecies=[],addedhc=[],hc_prod={},hc_react={},coefflim=6,msg=''):
+def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,usemapper=True,
+               addedspecies=[],addedhc=[],hc_prod={},hc_react={},coefflim=6,msg='',mandrcts={},addrctonly=False,
+               ignoreH=False):
     '''
     Balances reactions given reactant species information (Rdata) and product species information (Pdata)
     
@@ -109,6 +126,8 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
     hc_react is optional and is a dictionary of small species (help reactants) to use for balancing the LHS
     coefflim refers to the maximum allowed stoichiometric coefficient after balancing
     msg involves any warning messages or updates from the code
+    mandrcts is a list of mandatory reactants (To avoid balancer from removing them)
+    ignoreH refers to a boolean switch (True if all hydrogen species except H2 are ignored/not added)
     
     '''
     
@@ -119,28 +138,43 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
     if first:
         addedspecies=[]
         addedhc=[]
+        if not mandrcts:
+            mandrcts=copy.deepcopy(Rdata)
         if Rgtdata:
 #             smallspecies=[spec for spec in Rgtdata if Rgtdata[spec]['formula'] in ['H2','O2','H2O','OH2','HOH'] if spec not in Solvdata]
-            smallspecies=[spec for spec in Rgtdata if Rgtdata[spec]['formula'] in ['H2','O2','H2O','OH2','HOH']]
+#             smallspecies=[spec for spec in Rgtdata if Rgtdata[spec]['formula'] in ['H2','O2','H2O','OH2','HOH']]
+            smallspecies=[spec for spec in Rgtdata if Rgtdata[spec]['formula'] in ['H2','O2']]
             if smallspecies:
                 Rdata.update({spec:Rgtdata[spec] for spec in smallspecies})
                 addedspecies+=smallspecies
-                addedsmallspec=True
-    Rcount=sum([Counter(Rdata[ID]['atomdict']) for ID in Rdata for _ in range(Rdata[ID]['count'])],start=Counter()) #Sum of atom counts/types on LHS
-    Rcharge=sum([Rdata[ID]['charge'] for ID in Rdata for _ in range(Rdata[ID]['count'])])
-    Pcount=sum([Counter(Pdata[ID]['atomdict']) for ID in Pdata for _ in range(Pdata[ID]['count'])],start=Counter()) #Sum of atom counts/types on RHS
-    Pcharge=sum([Pdata[ID]['charge'] for ID in Pdata for _ in range(Pdata[ID]['count'])])
+
 
     #%% String output handling
     addedstr=''
     if addedspecies:
-        addedstr=' with species: '+(','.join([str(species) for species in addedspecies]))
+        addedstr=','.join([str(species) for species in set(addedspecies) if species not in mandrcts])
+        if addedstr:
+            addedstr=' with species: '+addedstr
     if addedhc:
-        addedstr2=' with help reactant(s): '+(','.join([hc_react[species]['formula'] for species in addedhc]))
+        addedstr2=','.join([hc_react[species]['formula'] for species in set(addedhc) if species not in mandrcts])
+        if addedstr2:
+            addedstr2=' with help reactant(s): '+addedstr2
         if addedstr:
             addedstr=addedstr+', '+addedstr2
         else:
             addedstr=addedstr2
+#     if 'Mandatory' in msg or 'Smiles discrepancy' in msg:
+    if 'Smiles discrepancy' in msg:
+        msg=msg+addedstr
+        return update_rxn(mandrcts,Pdata,hc_prod=hc_prod,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
+    if 'Hydrogen carriers' in msg:
+        msg=msg+addedstr
+        return update_rxn(Rdata,Pdata,hc_prod=hc_prod,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)            
+
+    Rcount=sum([Counter(Rdata[ID]['atomdict']) for ID in Rdata for _ in range(Rdata[ID]['count'])],start=Counter()) #Sum of atom counts/types on LHS
+    Rcharge=sum([Rdata[ID]['charge'] for ID in Rdata for _ in range(Rdata[ID]['count'])])
+    Pcount=sum([Counter(Pdata[ID]['atomdict']) for ID in Pdata for _ in range(Pdata[ID]['count'])],start=Counter()) #Sum of atom counts/types on RHS
+    Pcharge=sum([Pdata[ID]['charge'] for ID in Pdata for _ in range(Pdata[ID]['count'])])
             
     #%% If reaction is balanced already
     if Rcount==Pcount and Rcharge==Pcharge:
@@ -154,6 +188,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
         if addedstr:
             msg+=addedstr
         return update_rxn(Rdata,Pdata,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
+
         
 #%% Otherwise take difference between atom type/count RHS and LHS
 
@@ -163,12 +198,16 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
     postype={key:rem[key] for key in rem.keys() if rem[key]>0} #Finding only positive keys. Note that if counter is positive this means extra molecules need to be added on LHS (eg. reagent).
     negtype={key:abs(rem[key]) for key in rem.keys() if rem[key]<0} #Finding only negative keys. If counter is negative this means extra molecules need to be added on RHS (eg. help compounds)
 
-#     breakpoint()
-    if 'hydrogen carriers' in msg:
-        return update_rxn(Rdata,Pdata,hc_prod=hc_prod,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
-    
-    
-    elif postype: #Reactants, Reagents may be needed
+#     breakpoint()        
+
+    if postype: #Reactants, Reagents may be needed 
+        status=[mandrcts[ID0]['count']>Rdata[ID0]['count'] for ID0 in mandrcts if ID0 in Rdata] #if ID0 in Rdata
+        if any(status):
+            if msg:
+                msg=msg+', '+'Mapping error'+addedstr
+            else:
+                msg='Mapping error'+addedstr
+            return update_rxn(Rdata,Pdata,hc_prod=hc_prod,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
         #%% Initializing variables
         candirxt=[]
         candirgt=[]
@@ -185,16 +224,21 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
             candihc=[hcid for hcid in hc_react if set(postype.keys()).issubset(set(hc_react[hcid]['atomdict'].keys()))]
 #         breakpoint() 
         if candirxt and not candirgt: #Only reactant matches
-            Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,Rdata,candirxt,validate=False)
+            Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,Rdata,candirxt,Pdata,validate=False,rctonly=addrctonly,ignoreH=ignoreH)
         elif candirgt and not candirxt:
-            Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,Rgtdata,candirgt,validate=False)
+            Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,Rgtdata,candirgt,Pdata,validate=False,rctonly=False,ignoreH=ignoreH)
         elif candirxt and candirgt:
-            Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,{**Rdata,**Rgtdata},candirxt+candirgt,validate=False)
+            Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,{**Rdata,**Rgtdata},candirxt+candirgt,Pdata,validate=False,rctonly=addrctonly,ignoreH=ignoreH)
         elif not candirxt and not candirgt:
-            Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,{**Rdata,**Rgtdata},list(Rdata.keys())+list(Rgtdata.keys()))
+            combineddict={**Rdata,**Rgtdata}
+            candispec=[specid for specid in combineddict if set(combineddict[specid]['atomdict'].keys()).intersection(set(postype.keys()))]
+            if not candispec:
+                msg_='LHS species insufficient'
+            else:
+                Rdata,addedspecies_,msg_=resolvecandidates(postype,Rdata,combineddict,candispec,Pdata,rctonly=addrctonly,ignoreH=ignoreH)
         elif candihc and not candirxt and not candirgt:
-            Rdata,addedhc_,msg_=resolvecandidates(postype,Rdata,hc_react,candihc,validate=False)
-        if 'hydrogen carriers' in msg_: #Multiple candidates for hydrogen carriers (mapper won't help)
+            Rdata,addedhc_,msg_=resolvecandidates(postype,Rdata,hc_react,candihc,Pdata,validate=False,rctonly=addrctonly,ignoreH=ignoreH)
+        if 'Hydrogen carriers' in msg_: #Multiple candidates for hydrogen carriers (mapper won't help)
             if msg:
                 msg=msg+', '+msg_
             else:
@@ -205,91 +249,91 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
                 msg=msg+', '+msg_+addedstr
             else:
                 msg=msg_+addedstr
-            if rxnsmiles0 is not None:
-                return rxnsmiles0,'Error',msg,list(Rdata.keys()),list(Pdata.keys()),[],[],Rdata,Pdata
-            else:
-                return 'Error',msg,list(Rdata.keys()),list(Pdata.keys()),[],[],Rdata,Pdata 
+            return update_rxn(Rdata,Pdata,hc_prod=hc_prod,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
+
         else:
             addedspecies+=addedspecies_
+            if addedhc_:
+                adddedhc+=addedhc_
+            #New#
+            if len(postype)==1 and 'H' in postype and 'With hydrogen carriers' not in msg:
+                if msg:
+                    msg=msg+', '+'With hydrogen carriers: '+','.join([str(addedspec) for addedspec in addedspecies_])
+                else:
+                    msg='With hydrogen carriers: '+','.join([str(addedspec) for addedspec in addedspecies_])
+            #New#
+#         breakpoint()
         return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,first=False,usemapper=usemapper,
-                         addedspecies=addedspecies,addedhc=addedhc+addedhc_,hc_prod=hc_prod,
-                         hc_react=hc_react,coefflim=coefflim,msg=msg) 
+                         addedspecies=addedspecies,addedhc=addedhc,hc_prod=hc_prod,
+                         hc_react=hc_react,coefflim=coefflim,msg=msg,mandrcts=mandrcts,addrctonly=addrctonly,ignoreH=ignoreH) 
     
     elif negtype:
+#         breakpoint()
         if usemapper and len(set(addedspecies))>1: #More than one choice or added small species, let the mapper decide
-            addedspecies_=[]
-            addedhc_=[]
             rxnsmiles=buildrxn(Rdata,Pdata)
             mapped_rxn=maprxn([rxnsmiles])[0]
             if mapped_rxn=='Error':
-                if msg:
-                    msg=msg+', '+'Mapping error'+addedstr
-                else:
-                    msg='Mapping error'+addedstr
-                if rxnsmiles0 is not None:
-                    return update_rxn(Rdata,Pdata,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
-                else:
-                    return update_rxn(Rdata,Pdata,hcrct=addedhc,msg=msg)
+                if not addrctonly:
+                    addrctonly=True
+                    candidates2=[candi for candi in Rdata if candi in mandrcts]
+                    if candidates2 and candidates2!=list(Rdata.keys()):
+                        Rdata={ID0:Rdata[ID0] for ID0 in candidates2}
+                        addedspecies=[addedspec for addedspec in addedspecies if addedspec in Rdata]
+                        if addedhc:
+                            addedhc=[addedh for addedh in addedhc if addedh in Rdata]
+                        return balancerxn(Rdata,Pdata,rxnsmiles0=rxnsmiles0,first=False,usemapper=usemapper,
+                                         addedspecies=addedspecies,addedhc=addedhc,hc_prod=hc_prod,hc_react=hc_react,
+                                         coefflim=coefflim,msg=msg,mandrcts=mandrcts,addrctonly=addrctonly,ignoreH=ignoreH)
+                
+                if all([Rdata[ID0]['count']==1 for ID0 in Rdata]) or any([Rdata[ID0]['count']>=10 for ID0 in Rdata]):
+                    if msg:
+                        msg=msg+', '+'Mapping error'+addedstr
+                    else:
+                        msg='Mapping error'+addedstr
+                    return update_rxn(Rdata,Pdata,hc_prod=hc_prod,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
+                else:  
+                    status=[mandrcts[ID0]['count']>=Rdata[ID0]['count'] for ID0 in mandrcts if ID0 in Rdata] #if ID0 in Rdata
+                    if any(status):
+                        for ID0 in Rdata:
+                            Rdata[ID0]['count']=Rdata[ID0]['count']-1
+                    else:
+                        mandrcts=copy.deepcopy(Rdata)
+                        mincount=min([Rdata[ID0]['count'] for ID0 in Rdata])
+                        for ID0 in Rdata:
+                            Rdata[ID0]['count']=mincount
+                    return balancerxn(Rdata,Pdata,rxnsmiles0=rxnsmiles0,first=False,usemapper=usemapper,
+                                    addedspecies=addedspecies,addedhc=addedhc,hc_prod=hc_prod,hc_react=hc_react,
+                                    coefflim=coefflim,msg=msg,mandrcts=mandrcts,addrctonly=addrctonly,ignoreH=ignoreH)
             else:
                 mappedrxn=mapped_rxn.get('mapped_rxn')
-                conf=mapped_rxn.get('confidence')
-                rdrxn=rdChemReactions.ReactionFromSmarts(mappedrxn,useSmiles=True)
-                cleanrxn=copy.copy(rdrxn)
-                rdChemReactions.RemoveMappingNumbersFromReactions(cleanrxn)
-#                 breakpoint()
-                rmixtures={}
-                LHSdata={}
-                for ID,rct in enumerate(cleanrxn.GetReactants()):
-                    foundmatch=False
-                    mappedmol=rdrxn.GetReactants()[ID]
-                    formula=rdkit.Chem.rdMolDescriptors.CalcMolFormula(rct)
-                    if any([atom.HasProp('molAtomMapNumber') for atom in mappedmol.GetAtoms()]) or formula=='H2': #Confirmed, mapped reactant
-                        rctsmiles=Chem.MolToSmiles(molfromsmiles(Chem.MolToSmiles(rct))) #Ensuring RDKit smiles
-                        for ID0 in Rdata:
-                            if '.' in Rdata[ID0]['smiles'] and Rdata[ID0]['smiles']!=rctsmiles and rctsmiles in Rdata[ID0]['smiles'].split('.'): #Mixture detected
-                                foundmatch=True
-                                if ID0 not in rmixtures:
-                                    rmixtures.update({ID0:{rctsmiles:1}})
-                                elif rctsmiles not in rmixtures[ID0]:
-                                    rmixtures[ID0].update({rctsmiles:1})
-                                else:
-                                    rmixtures[ID0][rctsmiles]+=1
-                                break
-                            elif Rdata[ID0]['smiles']==rctsmiles:
-                                foundmatch=True
-                                if ID0 not in LHSdata.keys():
-                                    LHSdata.update({ID0:copy.deepcopy(Rdata[ID0])})
-                                    LHSdata[ID0]['count']=1
-                                else:
-                                    LHSdata[ID0]['count']+=1
-                                break
-                        if not foundmatch:
-                            LHSdata=Rdata
-                            if msg:
-                                msg=msg+', '+'Smiles discrepancy for species'
-                            else:
-                                msg='Smiles discrepancy for species'
-                            break
-                if msg:
-                    msg=msg+', '+'Mapper used'
+                if 'With hydrogen carriers' in msg:
+                    hcarriers=[int(hcarrier) for hcarrier in msg.split('With hydrogen carriers: ')[1].split(', ')[0].split(',')]
                 else:
-                    msg='Mapper used'
-                if rmixtures: #Mixture parsing
-                    msg=msg+', '+'Mixture detected for species: '+','.join([str(ID) for ID in rmixtures])
-                    for ID0 in rmixtures:
-                        count=max([rmixtures[ID0][rctsmiles] for rctsmiles in rmixtures[ID0]])
-                        LHSdata.update({ID0:Rdata[ID0]})
-                        LHSdata[ID0]['count']=count
-            
+                    hcarriers=[]
+#                 breakpoint()
+                LHSdata,_,msg_=checkrxn(mappedrxn,Rdata=Rdata,updateall=False,mandrcts=list(mandrcts.keys()),hcarriers=hcarriers)
+                if 'Mandatory' in msg_ and not addrctonly:#Reactants are unmapped (Try again with a smaller candidate selection)
+                    return balancerxn(mandrcts,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,first=True,usemapper=usemapper,
+                             addedspecies=addedspecies,addedhc=addedhc,hc_prod=hc_prod,
+                             hc_react=hc_react,coefflim=coefflim,msg=msg,addrctonly=True,ignoreH=ignoreH)
+                if msg:
+                    if msg_!='Valid':
+                        msg=msg_+', '+msg
+                    msg='Mapper used'+', '+msg
+                else:
+                    if msg_!='Valid':
+                        msg='Mapper used'+', '+msg_
+                    else:
+                        msg='Mapper used'
             if addedhc:
-                refhc=Counter(addedhc)
-                addedhc=[addedspec for addedspec in LHSdata for _ in range(min([LHSdata[addedspec]['count'],refhc[addedspec]])) if addedspec in addedhc]  
-            refspec=Counter(addedspecies)
-            addedspecies=[addedspec for addedspec in LHSdata for _ in range(min([LHSdata[addedspec]['count'],refspec[addedspec]])) if addedspec in addedspecies if addedspec not in addedhc]            
+                addedhc=[addedh for addedh in addedhc if addedh in LHSdata]  
+#             breakpoint()
+            addedspecies=[addedspec for addedspec in addedspecies if addedspec in LHSdata]
             return balancerxn(LHSdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,first=False,usemapper=False,
                              addedspecies=addedspecies,addedhc=addedhc,hc_prod=hc_prod,hc_react=hc_react,coefflim=coefflim,
-                             msg=msg)
+                             msg=msg,mandrcts=mandrcts,addrctonly=addrctonly,ignoreH=ignoreH)
         else:
+#             breakpoint()
             # Find match with Rdata first
             candidates=[spec for spec in Rdata if Rdata[spec]['atomdict']==negtype if spec in addedspecies]
             if not candidates:
@@ -311,10 +355,12 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
                         break
                 if specremoved:
                     if addedhc:
-                        refhc=Counter(addedhc)
-                        addedhc=[addedspec for addedspec in Rdata for _ in range(min([Rdata[addedspec]['count'],refhc[addedspec]])) if addedspec in addedhc]
-                    refspec=Counter(addedspecies)
-                    addedspecies=[addedspec for addedspec in Rdata for _ in range(min([Rdata[addedspec]['count'],refspec[addedspec]])) if addedspec in addedspecies if addedspec not in addedhc] 
+                        addedhc=[addedh for addedh in addedhc if addedh in Rdata]
+#                         refhc=Counter(addedhc)
+#                         addedhc=[addedspec for addedspec in Rdata for _ in range(min([Rdata[addedspec]['count'],refhc[addedspec]])) if addedspec in addedhc]
+                    addedspecies=[addedspec for addedspec in addedspecies if addedspec in Rdata]
+#                     refspec=Counter(addedspecies)
+#                     addedspecies=[addedspec for addedspec in Rdata for _ in range(min([Rdata[addedspec]['count'],refspec[addedspec]])) if addedspec in addedspecies if addedspec not in addedhc] 
                     if 'Mixture' in msg:
                         msglist=msg.split(',')
                         msglist2=copy.copy(msglist)
@@ -330,7 +376,7 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
                                 msg=', '.join(msglist2)
                     return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,first=False,usemapper=False,
                                   addedspecies=addedspecies,addedhc=addedhc,hc_prod=hc_prod,hc_react=hc_react,
-                                  coefflim=coefflim,msg=msg)
+                                  coefflim=coefflim,msg=msg,addrctonly=addrctonly,ignoreH=ignoreH)
                         
             # Then try help compounds
             if Rcharge==Pcharge:
@@ -348,7 +394,8 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
             hcid=[]
             try:
                 reac,prod,hcid,msg0=balance(Rdata,Pdata,hc_prod=hc_prod2,balbefore=balbefore,coefflim=coefflim,
-                                            addedspecies=addedspecies,addedhc=addedhc,hc_react=hc_react)
+                                            addedspecies=[addedspec for addedspec in addedspecies if addedspec not in mandrcts],
+                                            addedhc=[addedh for addedh in addedhc if addedh not in mandrcts],hc_react=hc_react)
                 if msg:
                     msg=msg+', '+msg0
                 else:
@@ -357,28 +404,32 @@ def balancerxn(Rdata,Pdata,Rgtdata={},Solvdata={},rxnsmiles0=None,first=True,use
                 if not balbefore:
                     return balancerxn(Rdata,Pdata,Rgtdata=Rgtdata,rxnsmiles0=rxnsmiles0,first=False,usemapper=False,
                                   addedspecies=addedspecies,addedhc=addedhc,hc_prod={},hc_react=hc_react,
-                                  coefflim=coefflim,msg=msg)
-                if msg: 
-                    msg=msg+', '+'RHS species insufficient'+addedstr
-                else:
-                    msg='RHS species insufficient'+addedstr
-                if Rcharge!=Pcharge:
-                    msg=msg+', '+'Charge imbalance'
-                return update_rxn(Rdata,Pdata,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
-            else:
+                                  coefflim=coefflim,msg=msg,addrctonly=addrctonly,ignoreH=ignoreH)
                 if Rcharge!=Pcharge:
                     if msg:
                         msg=msg+', '+'Charge imbalance'
                     else:
                         msg='Charge imbalance'
+                if msg: 
+                    msg=msg+', '+'RHS species insufficient'+addedstr
+                else:
+                    msg='RHS species insufficient'+addedstr
+                
+                return update_rxn(Rdata,Pdata,hcrct=addedhc,rxnsmiles0=rxnsmiles0,msg=msg)
+            else:
+                if Rcharge!=Pcharge:
+                    if msg:
+                        msg=msg+', '+'Charge imbalance'+addedstr
+                    else:
+                        msg='Charge imbalance'+addedstr
                 return update_rxn(Rdata,Pdata,reac=reac,prod=prod,hcprod=hcid,hc_prod=hc_prod2,hcrct=addedhc,
                                   rxnsmiles0=rxnsmiles0,msg=msg)
     else:
         if Rcharge!=Pcharge:
             if msg:
-                msg=msg+', '+'Charge imbalance'
+                msg=msg+', '+'Charge imbalance'+addedstr
             else:
-                msg='Charge imbalance'
+                msg='Charge imbalance'+addedstr
         return update_rxn(Rdata,Pdata,hc_prod=hc_prod,hcrct=addedhc,
                         rxnsmiles0=rxnsmiles0,msg=msg)
         
@@ -446,7 +497,7 @@ def update_stoich(stoich,compdict,hcID=None,hc_Dict=None):
             return compdict,msg,formdict
         else:
 #             breakpoint()
-            msg='Invalid balancing. Species missing:'+','.join([str(unused) for unused in unusedid])
+            msg='Invalid balancing. Species missing: '+','.join([str(unused) for unused in unusedid])
             return compdict,msg,formdict
         
 
@@ -486,7 +537,10 @@ def update_rxn(Rdata,Pdata,reac=None,prod=None,hc_prod=None,hcprod=[],hcrct=[],r
         else:
             balrxnsmiles='Error'
     else:
-        balrxnsmiles=buildrxn(Rdata,Pdata)
+        if ('LHS species insufficient' in msg) | ('Invalid' in msg) | ('Mapping error' in msg) | ('discrepancy' in msg):
+            balrxnsmiles='Error'
+        else:
+            balrxnsmiles=buildrxn(Rdata,Pdata)
                 
     if hcrct:
         LHSids=[ID for ID in Rdata if ID not in hcrct for _ in range(Rdata[ID]['count'])]
@@ -500,6 +554,23 @@ def update_rxn(Rdata,Pdata,reac=None,prod=None,hc_prod=None,hcprod=[],hcrct=[],r
         return rxnsmiles0,balrxnsmiles,msg,LHSids,RHSids,hcrct,hcprod,Rdata,Pdata  #Same number and type of atoms reactant and product side and same charge ie. perfectly balanced reaction. Pretty much impossible.
     else:
         return balrxnsmiles,msg,LHSids,RHSids,hcrct,hcprod,Rdata,Pdata
+    
+
+    
+    
+# def bal_stoichiometry(chempyr,chempyp):
+#     return balance_stoichiometry(chempyr,chempyp,underdetermined=None,allow_duplicates=True)
+# def bal_stoich(chempyr,chempyp):
+#     try:
+#         reac,prod=bal_stoichiometry(chempyr,chempyp)
+#         return reac,prod
+# #         reac,prod=func_timeout(5, bal_stoichiometry, args=(chempyr,chempyp))
+        
+#     except Exception:
+#         raise Exception
+
+
+    
     
                 
 def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=6):
@@ -531,7 +602,7 @@ def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=6):
         hcid=keylist[counter]
         chempyp.add(hc_atomtype[hcid]['formula'])
         try:
-            reac, prod = balance_stoichiometry(chempyr, chempyp,underdetermined=None,allow_duplicates=True)
+            reac, prod = balance_stoichiometry(chempyr,chempyp,underdetermined=None,allow_duplicates=True)
             if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
                 invalid=True
                 raise Exception
@@ -545,7 +616,9 @@ def tryhelp(hc_atomtype,chempyr,chempyp,coefflim=6):
     print('Reaction successfully balanced')
     return reac,prod,[hcid]    
 
-def balance(Rdata,Pdata,hc_prod={},balbefore=True,coefflim=6,addedspecies=[],addedhc=[],hc_react={}):
+
+
+def balance(Rdata,Pdata,hc_prod={},balbefore=True,coefflim=6,addedspecies=[],addedhc=[],hc_react={},mandrcts={}):
     '''
     Balances reaction given LHS and RHS species by invoking the balance_stoichiometry function from ChemPy
     
@@ -565,7 +638,9 @@ def balance(Rdata,Pdata,hc_prod={},balbefore=True,coefflim=6,addedspecies=[],add
     msg='Balanced'
     addedstr=''
     if addedspecies:
-        addedstr=' with species: '+(','.join([str(species) for species in addedspecies]))
+        addedstr=','.join([str(species) for species in set(addedspecies) if species not in mandrcts])
+        if addedstr:
+            addedstr=' with species: '+addedstr  
     if addedhc:
         addedstr2=' with help reactant(s): '+(','.join([hc_react[species]['formula'] for species in addedhc]))
         if addedstr:
@@ -576,7 +651,7 @@ def balance(Rdata,Pdata,hc_prod={},balbefore=True,coefflim=6,addedspecies=[],add
     
     if balbefore or not hc_prod: #Either user has indicated that first pass at balancing needs to be done or fails to specify help compounds
         try:
-            reac, prod = balance_stoichiometry(chempyr, chempyp,underdetermined=None,allow_duplicates=True) #Try balancing once without adding compounds
+            reac, prod = balance_stoichiometry(chempyr,chempyp,underdetermined=None,allow_duplicates=True) #Try balancing once without adding compounds
             if any(idx<0 for idx in reac.values()) or any(idx<0 for idx in prod.values()): #Don't want negative stoich coefficients
                 raise Exception
             elif any([idx>coefflim for tup in zip(reac.values(),prod.values()) for idx in tup]):
@@ -588,7 +663,7 @@ def balance(Rdata,Pdata,hc_prod={},balbefore=True,coefflim=6,addedspecies=[],add
             pass
         else: #Reaction successfully balanced
             return reac,prod,None,msg
-            
+#     breakpoint()   
     if hc_prod: #Can try help compounds
         try:
             reac,prod,hcid=tryhelp(hc_prod,chempyr,chempyp,coefflim=coefflim)
@@ -599,55 +674,164 @@ def balance(Rdata,Pdata,hc_prod={},balbefore=True,coefflim=6,addedspecies=[],add
             return reac,prod,hcid,msg+' with help product(s): '+hclist
     
 
-def findmatch(atomdeficit,atomdict):
+def findmatch(atomdeficit,atomdict,strict=True,returnmultdict=True):
     '''
     Calculates proportion of atoms mapped, based on given atom deficit dictionary and
     atom dictionary of a candidate
     '''
 #     breakpoint()
+    if not set(atomdict.keys()).intersection(set(atomdeficit.keys())): #No match at all
+        return False,False
     rem2=Counter()
     rem2.update(atomdict)
     rem2.subtract(Counter(atomdeficit))
     if any([val<0 for val in rem2.values()]):
-        if rem2.keys()==atomdict.keys() and len(set(Counter({k:rem2[k]/atomdict[k] for k in rem2}).values()))==1:
-            return 1.0 #Exact multiple
+        multdict={k:abs(atomdeficit[k]/atomdict[k]) for k in atomdeficit if k in atomdict}
+        if (atomdeficit.keys()==atomdict.keys()) & (len(set(Counter(multdict).values()))==1):
+            return 1.0,1 #Exact multiple
+        elif returnmultdict:
+            return False,multdict
         else:
-            return False
-    mapprop=1-(sum(rem2.values())/sum(atomdict.values()))
-    return round(mapprop,1)
+            if strict:
+                mult=int(ceil(max(multdict.values())))
+            else:
+                mult=int(ceil(min(multdict.values())))
+            return False,mult
+    mapprop=(sum(atomdeficit.values()))/(sum(atomdict.values()))
+#     mapprop=1-(sum(rem2.values())/sum(atomdict.values()))
+    return round(mapprop,1),1
 
-def resolvecandidates(postype,Rdata,specdict,candidates,update=True,validate=True):
+
+
+def resolvecandidates(postype,Rdata,specdict,candidates,Pdata,update=True,validate=True,rctonly=False,
+                      coefflim=6,ignoreH=False):
+    '''
+    Resolves candidates based on atom deficit (postype) and supplied candidate matches
+    
+    
+    '''
+    
 #     breakpoint()
+    msg=''
     if validate:
         combinedkeys={key for candi in candidates for key in specdict[candi]['atomdict'].keys()}
         if not set(postype.keys()).issubset(combinedkeys): #Reactants/reagents/solvents cannot account for atom imbalance
             msg='LHS species insufficient'
             return Rdata,candidates,msg
-            
-    if len(candidates)>1: #Multiple candidates
-        matches=[findmatch(postype,specdict[candi]['atomdict']) for candi in candidates]
+    if len(candidates)>1:
+        matches=[]
+        mult=[]
+        for candi in candidates:
+            match,mult_=findmatch(postype,specdict[candi]['atomdict'])
+            matches+=[match]
+            mult+=[mult_] 
         if 1 in matches:
-            candidates=[candidates[matches.index(1)]]
-        elif all(match is not False for match in matches):
-            if len(postype)==1 and 'H' in postype: #Deficit is only hydrogen, so mapper will not help
-                counter=Counter(matches)
-                maxmatch=max(matches)
-                if counter[maxmatch]==1:
-                    candidates=[candidates[matches.index(maxmatch)]]
-            elif len(set(matches))==len(matches):
-                index_max = max(range(len(matches)), key=matches.__getitem__) #Species with maximum atoms mappable
-                candidates=[candidates[index_max]]
-            
-    if len(postype)==1 and 'H' in postype and len(candidates)>1: #Still multiple options
-        msg='Reducing agent/hydrogen carriers required and available: '+','.join([str(candi) for candi in candidates])
-        return Rdata,candidates,msg      
+            index_max=[i for i,match in enumerate(matches) if match==1]
+            candidates=[candidates[idx] for idx in index_max]
+            mult=[mult[idx] for idx in index_max]
+        else:
+            if len(candidates)>1:
+                if len(postype)==1 and 'H' in postype and ignoreH:
+                    msg='Hydrogen carriers: '+','.join([str(candi) for candi in candidates])
+                    return Rdata,candidates,msg
+                if all(match is not False for match in matches):
+                    if len(postype)==1 and 'H' in postype: #Deficit is only hydrogen, so mapper will not help
+                        counter=Counter(matches)
+                        maxmatch=max(matches)
+                        if counter[maxmatch]==1:
+                            index_max=matches.index(maxmatch)
+                            candidates=[candidates[index_max]]
+                            mult=[mult[index_max]]
+                    elif len(set(matches))==len(matches): #Possibility of mapping wrong species still there
+                        index_max = max(range(len(matches)), key=matches.__getitem__) #Species with maximum atoms mappable
+                        candidates=[candidates[index_max]]
+                        mult=[mult[index_max]]
+                else: #Higher stoichiometric coefficients needed or more than one species needed
+#                     breakpoint()
+                    atompop={k:[] for k in postype}
+                    for candi,mult_ in zip(candidates,mult):
+                        if type(mult_)==dict:
+                            for k in mult_:
+                                if k in atompop:
+                                    atompop[k].extend([candi])
+                        else:
+                            for k in specdict[candi]['atomdict']:
+                                if k in atompop:
+                                    atompop[k].extend([candi])
+#                     breakpoint()
+                    for k in sorted(atompop, key=lambda k: (len(atompop[k]),postype[k])):
+                        if rctonly:
+                            extrarct=[rctid for rctid in Rdata if k in Rdata[rctid]['atomdict'] if rctid not in candidates]
+                        else:
+                            extrarct=[rctid for rctid in specdict if k in specdict[rctid]['atomdict'] if rctid not in candidates]
+                        if extrarct:
+                            for rctid in extrarct:
+                                mult_=int(ceil(postype[k]/specdict[rctid]['atomdict'][k]))
+                                if mult_<=1:
+                                    mult_=1
+                                    matches+=[True]
+                                else:
+                                    matches+=[False]
+                                mult+=[mult_]
+                            candidates+=extrarct
+                            atompop[k].extend(extrarct)
+                        if len(atompop[k])==1: #Only one candidate for atom
+                            candi=atompop[k][0]
+                            mult_=mult[candidates.index(candi)]
+                            if type(mult_)==dict:
+                                mult=[int(ceil(mult_[k]))]
+                            else:
+                                mult=[mult_]
+                            candidates=[candi]
+                            break
+                        else:
+                            if len(postype)==1 and 'H' in postype:
+                                msg='Hydrogen carriers: '+','.join([str(candi) for candi in candidates])
+                                return Rdata,candidates,msg
+                            matches2=[]
+                            candidates2=[]
+                            for candi in atompop[k]:
+                                idx=candidates.index(candi)
+                                mult_=mult[idx]
+                                if type(mult_)==dict:
+                                    mult_=int(ceil(mult_[k]))
+                                mult[idx]=mult_
+                                match=matches[idx]
+                                if match==False:
+                                    atomdict=copy.deepcopy(specdict[candi]['atomdict'])
+                                    totatomdict={j:atomdict[j]*mult_ for j in atomdict}
+                                    totmapped={j:min(totatomdict[j],postype[j]) for j in postype if j in atomdict}
+                                    mapprop=round((sum(totmapped.values()))/(sum(totatomdict.values())),1)
+                                    matches[idx]=mapprop
+                                    matches2+=[mapprop]
+                                else:
+                                    matches2+=[match]
+                            counter=Counter(matches2)
+                            maxmatch=max(matches2)
+                            if rctonly:
+                                candidates2=[candi for candi in atompop[k] if candi in Rdata]
+                            if not candidates2:
+                                candidates2=[candi for candi in atompop[k] if matches[candidates.index(candi)]==maxmatch or candi in Rdata]
+                            mult2=[mult[candidates.index(candi)] for candi in candidates2]
+                            candidates=candidates2
+                            mult=mult2
+                            break
+    else:            
+        mult=[1]
+                                
+    if len(candidates)>1  and 'Hydrogen carriers' not in msg: #or ignoreH
+        if len(postype)==1 and 'H' in postype: #Still multiple options
+            msg='Hydrogen carriers: '+','.join([str(candi) for candi in candidates])
+            return Rdata,candidates,msg
+#     breakpoint()
     msg='Valid'
     if update:
-        for candi in candidates:
+        for candi,mult_ in zip(candidates,mult):
             if candi in Rdata.keys():
-                Rdata[candi]['count']+=1
+                Rdata[candi]['count']+=mult_
             else:
                 Rdata.update({candi:specdict[candi]})
+                Rdata[candi]['count']=mult_
     return Rdata,candidates,msg
 
 

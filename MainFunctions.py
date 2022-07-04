@@ -146,9 +146,40 @@ def drawMol(m,filetype):
     else:
         im=Image.open(io.BytesIO(img))
         return im
-
+def highlightsubstruct(smi,pattlist=[]):
+    m=molfromsmiles(smi)
+    m=Chem.AddHs(m)
+    hits_atsfin=[]
+    hits_bondfin=[]
+    for patt in pattlist:
+        patt=Chem.MolFromSmarts(patt)
+        hit_ats=[list(match) for match in m.GetSubstructMatches(patt)]
+#                 hit_ats=[at for match in m.GetSubstructMatches(patt) for at in match]
+        if not hit_ats:
+            continue
+        hit_bonds = []
+        for bond in patt.GetBonds():
+            for match in hit_ats:
+                aid1 = match[bond.GetBeginAtomIdx()]
+                aid2 = match[bond.GetEndAtomIdx()]
+                hit_bonds.append(m.GetBondBetweenAtoms(aid1,aid2).GetIdx())
+        hits_atsfin+=list(set([at for match in hit_ats for at in match]))
+        hits_bondfin+=list(set(hit_bonds))
+    colors=[(0.7,1,0.7)]
+    atom_cols={}
+    for i, at in enumerate(hits_atsfin):
+        atom_cols[at] = colors[0]
+    bond_cols = {}
+    for i, bd in enumerate(hits_bondfin):
+        bond_cols[bd] = colors[0]
+    d = rdMolDraw2D.MolDraw2DSVG(500, 500) # or MolDraw2DCairo to get PNGs
+    rdMolDraw2D.PrepareAndDrawMolecule(d, m, highlightAtoms=hits_atsfin,
+                                        highlightBonds=hits_bondfin,highlightAtomColors=atom_cols,highlightBondColors=bond_cols)
+    d.FinishDrawing()
+    return SVG(d.GetDrawingText())
 
 #%% Utility Functions
+        
 class CustomError(Exception):
     '''
     For error handling

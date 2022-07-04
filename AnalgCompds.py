@@ -36,6 +36,8 @@ def getCarrierFrags0(smi,expand=1,userinput='smiles',resFormat='smarts',addHs=Tr
         mol.UpdatePropertyCache(strict=False)
     else:
         mol=smi
+        Chem.SanitizeMol(mol)
+        mol.UpdatePropertyCache(strict=False)
     if addHs:
         mol = Chem.AddHs(mol)
     # -- get the list of functional groups FG
@@ -118,7 +120,7 @@ def getCarrierFrags0(smi,expand=1,userinput='smiles',resFormat='smarts',addHs=Tr
     
     
 
-def processquery(userinput,expand=1,refquery={},debug=False):
+def processquery(userinput,expand=1,refquery=None,debug=False):
     '''
     Takes in user input (reaction), splits into species, and creates dictionary with carrier fragments for each
     
@@ -126,6 +128,7 @@ def processquery(userinput,expand=1,refquery={},debug=False):
     refquery refers to past user inputs that may have already computed results (to avoid computation as this is expensive)
     Specify debug as true for feedback and opportunity to manually specify carrier fragments for species
     '''
+#     breakpoint()
     if not type(userinput)==str:
         raise CustomError("Please input a reaction smiles string. Include '>>' even if no products are inputted")
     splitrxn=userinput.split('>>')
@@ -135,13 +138,19 @@ def processquery(userinput,expand=1,refquery={},debug=False):
         specs=set(splitrxn[0].split('.')).union(set(splitrxn[1].split('.')))
     inputquery={'smiles':userinput,'species':{}}
     specs={Chem.MolToSmiles(molfromsmiles(spec)) for spec in specs}
-    species=inputquery['species']  
+    species=inputquery['species']
+    if refquery is not None:
+        if type(refquery)==str:
+            refquery=openpickle(refquery)
     for spec in specs:
         species.update({spec:{}})
-        if refquery and spec in refquery['species']:
+        if (refquery is not None) and spec in refquery['species']:
             carrierfrags=list(refquery['species'][spec].keys())
         else:
-            carrierfrags2=Counter(getCarrierFrags0(spec,expand=expand,resFormat='smiles'))
+            carrierfrags=getCarrierFrags0(spec,expand=expand,resFormat='smiles')
+            if type(carrierfrags)==str:
+                carrierfrags=[carrierfrags]
+            carrierfrags2=Counter(carrierfrags)
             carrierfrags=list(carrierfrags2.keys())
         ### User input ####
         userinput2='N'
@@ -156,14 +165,17 @@ def processquery(userinput,expand=1,refquery={},debug=False):
                         usermodified=False
                         userexpand=input('Specify expansion number:')
                         userexpand=int(userexpand)
-                        carrierfrags2=Counter(getCarrierFrags0(spec,expand=userexpand,resFormat='smiles'))
+                        carrierfrags=getCarrierFrags0(spec,expand=expand,resFormat='smiles')
+                        if type(carrierfrags)==str:
+                            carrierfrags=[carrierfrags]
+                        carrierfrags2=Counter(carrierfrags)
                         carrierfrags=list(carrierfrags2.keys())
                     elif choice=='B':
                         usermodified=True
                         userexpand=expand
                         fragvalid=False
                         iters=0
-                        carrierfrags2=Counter(carrierfrags)
+                        carrierfrags2={}
                         while not fragvalid: 
                             iters+=1
                             if iters>5:
@@ -174,7 +186,7 @@ def processquery(userinput,expand=1,refquery={},debug=False):
                                 matches=findfragsub(spec,carrierfrag,fragment=False,addHs=True,returnindices=True)
                                 if matches:
                                     count=len(matches)
-                                    carrierfrags2[carrierfrag]=count
+                                    carrierfrags2.update({carrierfrag:count})
                                     fragvalid=True
                                 else:
                                     fragvalid=False
@@ -182,7 +194,8 @@ def processquery(userinput,expand=1,refquery={},debug=False):
         species[spec].update({carrierfrag:{'parent':spec,'count':carrierfrags2[carrierfrag],'expand':userexpand,'usermodified':usermodified} for carrierfrag in carrierfrags})
     return inputquery
 
-def getanaloguespecies(inputquery,DBsource,SQL=False,refquery={},ncpus=16,fragtable=None,substancedbsource=None,includeisotopes=False):
+def getanaloguespecies(inputquery,DBsource,SQL=False,refquery=None,ncpus=16,fragtable=None,substancedbsource=None,
+                       includefragparents=False,onlyisotopes=True):
     '''
     Takes in input query dictionary and fragment database (DBsource) and populates each carrier fragment, returning updated dictionary
     with analogue species pools. Also returns a fragment dictionary (keys are fragments and values are query species).
@@ -197,7 +210,9 @@ def getanaloguespecies(inputquery,DBsource,SQL=False,refquery={},ncpus=16,fragta
     hydrogen (aromatic/aliphatic hydrocarbons)as the fragment identification algorithm does not extract these 
     (Only heteroatoms)
     
-    Specify includeisotopes as True if isotope fragments need to be considered
+    Specify onlyisotopes as True if only isotope fragments need to be considered
+    
+    Specify includefragparents as True if larger fragments with the desired fragment as a substructure need to be considered
     
     '''
     if type(DBsource)==str:
@@ -209,6 +224,12 @@ def getanaloguespecies(inputquery,DBsource,SQL=False,refquery={},ncpus=16,fragta
         DB=DBsource
     elif type(DBsource)==sqlite3.Connection:
         DB=DBsource
+    if fragtable is not None:
+        if type(fragtable)==str:
+            fragtable=pd.read_pickle(fragtable)
+    if refquery is not None:
+        if type(refquery)==str:
+            refquery=openpickle(refquery)
     inputquery2=copy.deepcopy(inputquery) #Output populated dictionary
     fragdict={} #To document fragments that are completed
     for spec in inputquery['species']:
@@ -216,13 +237,13 @@ def getanaloguespecies(inputquery,DBsource,SQL=False,refquery={},ncpus=16,fragta
 #             breakpoint()
             fraginfo=inputquery2['species'][spec][frag]
             if frag in fragdict: #If fragment has already been processed previously
-                refspec=fragdict[frag][0]
+                refspec=fragdict[frag]['Query'][0]
                 analoguepool=inputquery2['species'][refspec][frag]['analoguepool']
-                fragdict[frag].extend([fraginfo['parent']])
+                fragdict[frag]['Query'].extend([fraginfo['parent']])
             else:
                 if frag not in fragdict:
-                    fragdict.update({frag:[fraginfo['parent']]})
-                if refquery and spec in refquery['species'] and frag in refquery['species'][spec] and 'analoguepool' in refquery['species'][spec][frag]: #If user provides a reference query
+                    fragdict.update({frag:{'Query':[fraginfo['parent']],'Fraglist':[]}})
+                if (refquery is not None) and spec in refquery['species'] and frag in refquery['species'][spec] and 'analoguepool' in refquery['species'][spec][frag]: #If user provides a reference query
                     analoguepool=refquery['species'][spec][frag]['analoguepool']
                 else:
                     #Check if fragment is in database
@@ -231,21 +252,25 @@ def getanaloguespecies(inputquery,DBsource,SQL=False,refquery={},ncpus=16,fragta
                         result=pd.read_sql_query(sql3,DB)
                         present=result.iloc[0].values[0]
                     else:
-                        if frag in fragdb.index:
+                        if frag in DB.index:
                             present=True
                         else:
                             present=False
-                            
                     if present:
-                        if includeisotopes: #Other fragments that include specified fragment as substructure
+                        if onlyisotopes or includefragparents: #Other fragments that include specified fragment as substructure
                             if fragtable is None:
                                 raise CustomError('Please supply a fragment table or dataframe of fragments')
                             fraglist=[]
                             initray(num_cpus=ncpus)
-                            freqtabledis=mpd.DataFrame(freqtable)
+                            freqtabledis=mpd.DataFrame(fragtable)
                             fraglist=freqtabledis.apply(ffsrow,patt=frag,colname='FragSmiles',axis=1,result_type='reduce')
                             fraglist=pd.Series(data=fraglist.values,index=fraglist.index)
                             fraglist=list(fraglist[fraglist.values==True].index)
+                            if onlyisotopes:
+                                fragatomlen=len(Chem.MolFromSmarts(frag).GetAtoms())
+                                charge=Chem.rdmolops.GetFormalCharge(Chem.MolFromSmarts(frag))
+                                fraglist=[fragcandi for fragcandi in fraglist if len(Chem.MolFromSmarts(fragcandi).GetAtoms())==fragatomlen if Chem.rdmolops.GetFormalCharge(Chem.MolFromSmarts(fragcandi))==charge]
+                            fragdict[frag]['Fraglist']=fraglist
                             analoguepool=getCompPool(DB,fraglist,SQL=SQL)
                             if not analoguepool.empty:
                                 analoguepool=analoguepool.droplevel(0)
@@ -267,13 +292,14 @@ def getanaloguespecies(inputquery,DBsource,SQL=False,refquery={},ncpus=16,fragta
                         matches=pd.Series(data=matches.values,index=matches.index)
                         match=list(matches[matches.values==True].index) 
                         analoguepool=substancedb.loc[substancedb.index.isin(match)]
-            fraginfo.update({'analoguepool':analoguepool})     
+            fraginfo.update({'analoguepool':analoguepool}) 
+            fragdict[frag]['analoguepool']=set(analoguepool.index)
     return inputquery2,fragdict
 
 
            
 def updatequery(inputquery,fragchoice={},similarity=True,fingerprint='morgan',morganradius=2,addHs=True,
-                molwt=True,refquery={},ncpus=16):
+                molwt=True,refquery=None,ncpus=16):
     '''
     Takes an input query dictionary with analogue species pools and adds additional information such as 
     fingerprint similarity and molecular weight
@@ -287,13 +313,16 @@ def updatequery(inputquery,fragchoice={},similarity=True,fingerprint='morgan',mo
     
     '''
     species=inputquery['species']
+    if refquery is not None:
+        if type(refquery)==str:
+            refquery=openpickle(refquery)
     for spec in species:
         for frag in species[spec]:
             if fragchoice and frag not in fragchoice:
                 continue
             error=False
             fraginfo=species[spec][frag]
-            if refquery:
+            if refquery is not None:
                 try:
                     analoguepool=refquery['species'][spec][frag]['analoguepool']
                     if similarity:
@@ -309,7 +338,7 @@ def updatequery(inputquery,fragchoice={},similarity=True,fingerprint='morgan',mo
                 except Exception:
                     error=True
                     pass
-            elif not refquery or error:
+            if (refquery is None) or error:
                 analoguepool=fraginfo['analoguepool']
                 initray(num_cpus=ncpus)
                 analoguepooldis=mpd.DataFrame(analoguepool)
