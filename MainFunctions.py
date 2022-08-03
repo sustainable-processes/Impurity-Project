@@ -19,21 +19,15 @@ from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 #%% Generating mol files
 
 def molfromsmiles(SMILES):
-    '''
-    Converts a smiles string into a mol object for RDKit use. Also graphically
-    represents molecule using matplotlib.
+    """
+    Converts a smiles string into a mol object for RDKit use.
 
-    Parameters
-    ----------
-    SMILES : String
-        Smiles string of molecule
+    Args:
+        SMILES (Str): Smiles string of molecule
 
-    Returns
-    -------
-    mol: RDKit mol object
-
-    '''
-
+    Returns:
+        mol: RDKit mol object
+    """
     mol=Chem.MolFromSmiles(SMILES)
     Chem.SanitizeMol(mol)
     mol.UpdatePropertyCache(strict=False)
@@ -43,20 +37,15 @@ def molfromsmiles(SMILES):
 
 
 def mol_with_atom_index(mol):
-    '''
+    """
     Draw a molecule with atom index numbers (set by RDKit)
 
-    Parameters
-    ----------
-    mol : RDKit mol
-        RDKit mol plain
+    Args:
+        mol (RDKit mol): RDKit mol plain
 
-    Returns
-    -------
-    mol : RDkit mol
-        RDKit mol with atom indices
-
-    '''
+    Returns:
+        mol: RDKit mol with atom indices
+    """
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx())
     return mol
@@ -106,13 +95,10 @@ def drawReaction(rxn):
 #     d2d.drawOptions().minFontSize = 20
     # else:
     #     d2d=rdMolDraw2D.MolDraw2DCairo(4000,500)
-
     d2d.DrawReaction(trxn,highlightByReactant=True)
     d2d.FinishDrawing()
     img=d2d.GetDrawingText()
-
     # if filetype=='svg':
-
     return SVG(img)
     # else:
     #     im=Image.open(io.BytesIO(img))
@@ -345,39 +331,28 @@ def atomtypes(mol):
     return typedict, charge
 
 def getcompdict(ID=1,mol=None,smiles=None,formula=None,FragDB=None):
-    '''
+    """
     Wrapper for atomtypes. ID must be input whether Reaxys ID or random number. Default is 1. 
     Smiles and mol can also be specified. Can be converted to an object instance if intended.
+    
+    Args:
+        ID (int, optional): ID of compound/mol. Defaults to 1.
+        mol (RDKit mol, optional): RDKit mol. Defaults to None.
+        smiles (str, optional): mol smiles. Defaults to None.
+        formula (str, optional): mol formula. Defaults to None.
+        FragDB (Pandas dataframe, optional): Pandas dataframe to find smiles of ID. Defaults to None.
 
-    Parameters
-    ----------
-    ID : int, optional
-        ID of compound/mol. The default is 1.
-    mol : RDKit mol, optional
-        RDKit mol. The default is None.
-    smiles : str, optional
-        mol smiles. The default is None.
-    formula : str, optional
-        mol formula. The default is None.
-    FragDB : Pandas dataframe, optional
-        Pandas dataframe to find smiles of ID. The default is None.
-
-    Raises
-    ------
-    CustomError
-        Raises error if smiles/mol not specified, only ID specified
+    Raises:
+        CustomError: Raises error if smiles/mol not specified, only ID specified
         without reference fragment dataframe. Also if anything specified
         is not valid/cannot be processed.
 
-    Returns
-    -------
-    compddict : dict
-        Compound dictionary with ID as key and another dictionary with the
+    Returns:
+        dict: Compound dictionary with ID as key and another dictionary with the
         following keys: 'atomdict' (Output of atomtypes, dictionary with atom
         elements and count), 'charge' (Overall charge of mol),'smiles'
         (smiles of mol),'formula' (chemical formula),'count' (instance number, always 1)
-
-    '''
+    """
 
     if smiles is None and mol is None:
         if FragDB is None:

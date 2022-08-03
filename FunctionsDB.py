@@ -18,7 +18,7 @@ import os
 import dask.delayed as delayed
 import dask.dataframe as dd
 import dask.array as da
-import dask.bag as dba
+import dask.bag as db
 import numpy as np
 import pandas as pd
 
@@ -29,8 +29,8 @@ def info(molfile):
     if mol:
         Chem.SanitizeMol(mol)
         mol.UpdatePropertyCache(strict=False)
-        smils = Chem.MolToSmiles(mol)
-        return mol, smils
+        smiles = Chem.MolToSmiles(mol)
+        return mol, smiles
     else:
         return molfile
 
@@ -117,7 +117,6 @@ def getCarrierFrags0(smi,expand=1,userinput='smiles',resFormat='smarts',addHs=Tr
     # [[2, 3, 8], ...] or [[], [], ...], note [2, 3, 8] are terminal of comp not frag
     FGs_terminal_atomIDs = [None]*n_FGs
     for i in range(n_FGs):
-#         breakpoint()
         # initialization before search and expand fragments
         FG_atomIDs = list(FGs_atomIDs[i])  # e.g., [1, 4, 7]
         FG_size = len(FG_atomIDs)
@@ -146,10 +145,6 @@ def getCarrierFrags0(smi,expand=1,userinput='smiles',resFormat='smarts',addHs=Tr
                 FGs_terminal_atomIDs[i] = FG_terminal_atomIDs  # [] case 2
                 if len(FG_terminal_atomIDs) == 0:  # cannot expand due to small comp size
                     break  # for expan of next FG
-    # it seems not possible that [[2, 3, 8], [], ...], if there one [] then all should be [],
-    # either [[]] or [[], [], ...] (i.e., small comp with single or multiple FGs)
-    # sum([len(_) for _ in FGs_terminal_atomIDs]) == 0:
-#     breakpoint()
     if len(FGs_terminal_atomIDs[0]) == 0:
         if resFormat == 'smiles':
             if userinput!='smiles':
@@ -173,7 +168,7 @@ def getCarrierFrags0(smi,expand=1,userinput='smiles',resFormat='smarts',addHs=Tr
         return FGs_strs
     
     
-def getCarrierFrags(smi, size, resFormat='smarts', addHs=True):
+def getCarrierFrags(smi, size, resFormat='smarts', addHs=True): #Old carrier fragment extraction algorithm
     """
     str (smiles), int -> list (str_smiles/smarts) 
     smi: str, smiles of a compound
