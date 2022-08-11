@@ -1,4 +1,5 @@
 # %load ./MainFunctions.py
+import ray
 from rdkit import Chem #Importing RDKit
 from rdkit.Chem import Draw #For drawing molecules/reactions
 from rdkit.Chem import rdChemReactions #Reaction processing
@@ -379,6 +380,7 @@ def getcompdict(ID=1,mol=None,smiles=None,formula=None,FragDB=None):
 #%% Database functions
 
 def locrecord(ID,DB,smiles=False,fragsmarts=False,fragsmiles=False,mixture=False):
+
     '''
     Returns desired information by searching fragment database by ID
 
@@ -450,3 +452,26 @@ def getfragments(chemlist,smiles=False,ref=None):
             raise CustomError('One or more compounds missing from database')
         else:
             return frag
+#%% Parallel processing functions
+
+def initray(restart=True,num_cpus=16,log_to_driver=False):
+    """
+    Initiates cluster of CPUs for parallel processing. If restart is True, will restart cluster if already running.
+
+    Args:
+        restart (bool, optional): Controls if ray cluster already exists, will restart. Defaults to True.
+        num_cpus (int, optional): Number of CPUs to run in parallel. Defaults to 16.
+        log_to_driver (bool, optional): Controls if more fine-grained status information on parallel execution is outputted to console. Defaults to False.
+    """
+    if restart:
+        ray.shutdown()
+    ray.init(num_cpus=num_cpus,log_to_driver=log_to_driver)
+
+
+def chunks(lst, s=None,k=None):
+    """Yield successive s-sized chunks or k chunks from lst"""
+    if s is not None:
+        return [lst[i:i+s] for i in range(0,len(lst),s)]
+    elif k is not None:
+        n=len(lst)
+        return [lst[i * (n // k) + min(i, n % k):(i+1) * (n // k) + min(i+1, n % k)] for i in range(k)]

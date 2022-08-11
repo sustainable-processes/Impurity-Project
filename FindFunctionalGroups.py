@@ -108,6 +108,5 @@ def main():
         fgs = identify_functional_groups(m)
         print('%2d: %d fgs'%(ix+1, len(fgs)), fgs)
 
-
 if __name__ == "__main__":
     main()

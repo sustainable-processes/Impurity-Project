@@ -2,15 +2,18 @@
 
 import ray
 import modin.pandas as mpd
+from AnalgCompds import processquery
+from MainFunctions import CustomError, drawReaction, openpickle, writepickle
 from ReaxysAPIv2 import initray
 from helpCompound import hc_Dict,hc_rct
 import matplotlib.pyplot as plt
 import pandas as pd
+import os
 
 
 
 # Main Script
-masterdbreadpath='/home/aa2133/Impurity-Project/Reaxys_Data/'
+masterdbreadpath='/home/aa2133/Impurity-Project/Reaxys_Data/' # Master data source path
 datasources={'fraggroupssource':masterdbreadpath+'fragfreq.pickle',
                 'fragdbsource':masterdbreadpath+'fragdb.pickle',
                 'rxnsource':masterdbreadpath+'ReactionDB.pickle',
@@ -143,9 +146,9 @@ step14params={'summary3':None,
              'summaryfilename':'summary',
              'summary2filename':'summary2',
              'summary3filename':'summary3',
-              'relquantile':0.9,     #0.75
-              'uppertquantile':0.95, #0.9
-              'lowertquantile':0.05 #0.1
+              'relquantile':0.9,     
+              'uppertquantile':0.95, 
+              'lowertquantile':0.05
              }
 
 step15params={'analoguedisplay':2,

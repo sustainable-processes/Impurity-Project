@@ -4,18 +4,20 @@ from collections import OrderedDict #Preserve order of keys relative to reaction
 from rdkit import Chem
 from rdkit.Chem import rdChemReactions #Reaction processing
 import copy
-from FunctionsDB import getCarrierFrags
-from rxnmapper import RXNMapper #Importing RXNMapper for unsupervised atom mapping
+from AnalgRxns import userefrxns
+from rxnmapper import RXNMapper
+from pydantic.typing import List
+from MainFunctions import initray #Importing RXNMapper for unsupervised atom mapping
 #%% Reaction Mapping
 
-def maprxn(rxns):
+def maprxn(rxns:List[str]):
     """
     For a given list of reactions, rxns, returns mapped reactions with confidence scores.
     Uses IBM transformer model.
 
     Parameters
     ----------
-    rxns : list
+    rxns : List[str]
         List of reaction SMILES (no reactant/reagent split)
 
     Returns
