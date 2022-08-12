@@ -2,10 +2,11 @@
 
 import copy
 from pydantic import validate_arguments
-from typing import List, Dict, Union,Tuple,Set
+from typing import List, Dict, Union, Tuple, Set
 from rdkit import Chem
+from rdkit.Chem import AllChem
 from rdkit.Chem.Descriptors import MolWt
-from MainFunctions import molfromsmiles, CustomError, openpickle
+from MainFunctions import molfromsmiles, CustomError, openpickle, initray
 from collections import Counter
 import sqlite3
 import pandas as pd
@@ -13,10 +14,8 @@ from FindFunctionalGroups import identify_functional_groups as IFG
 from rdkit.Chem.Fingerprints import FingerprintMols
 from rdkit import DataStructs
 import modin.pandas as mpd
-from MainFunctions import initray
 
-
-#%% Fragment detection
+# %% Fragment detection
 def getCarrierFrags0(
     userinput: Union[str, Chem.rdchem.Mol],
     expand: bool = 1,
@@ -261,9 +260,10 @@ def processquery(
         )
     return inputquery
 
+
 def getanaloguespecies(
     inputquery: Dict,
-    DBsource: Union[str,pd.DataFrame, sqlite3.Connection],
+    DBsource: Union[str, pd.DataFrame, sqlite3.Connection],
     SQL: bool = False,
     refquery: Dict = None,
     ncpus: int = 16,
@@ -272,7 +272,6 @@ def getanaloguespecies(
     includefragparents: bool = False,
     onlyisotopes: bool = True,
 ) -> Tuple[Dict, Dict]:
-
     """
     Takes in input query dictionary and fragment database (DBsource) and populates each carrier fragment, returning updated dictionary
     with analogue species pools. Also returns a fragment dictionary (keys are fragments and values are query species).
@@ -304,7 +303,7 @@ def getanaloguespecies(
         if isinstance(fragtable, str):
             fragtable = pd.read_pickle(fragtable)
     if refquery is not None:
-        if isinstance(refquery,str):
+        if isinstance(refquery, str):
             refquery = openpickle(refquery)
     inputquery2 = copy.deepcopy(inputquery)  # Output populated dictionary
     fragdict = {}  # To document fragments that are completed
@@ -398,7 +397,7 @@ def getanaloguespecies(
                             raise CustomError(
                                 "Please supply a substance dataframe or address for custom fragments"
                             )
-                        elif isinstance(substancedbsource,str):
+                        elif isinstance(substancedbsource, str):
                             substancedb = pd.read_pickle(substancedbsource)
                         else:
                             substancedb = substancedbsource
@@ -418,54 +417,39 @@ def getanaloguespecies(
             fragdict[frag]["analoguepool"] = set(analoguepool.index)
     return inputquery2, fragdict
 
+
 def updatequery(
-    inputquery:Dict,
-    fragchoice:Union[Dict,Set]={},
-    similarity:bool=True,
-    fingerprint:str="morgan",
-    morganradius:int=2,
-    addHs:bool=True,
-    molwt:bool=True,
-    refquery:Dict=None,
-    ncpus:int=16,
-)->Dict:
+    inputquery: Dict,
+    fragchoice: Union[Dict, Set, List] = {},
+    similarity: bool = True,
+    fingerprint: str = "morgan",
+    morganradius: int = 2,
+    addHs: bool = True,
+    molwt: bool = True,
+    refquery: Dict = None,
+    ncpus: int = 16,
+) -> Dict:
     """
     Takes an input query dictionary with analogue species pools and adds additional information such as
     fingerprint similarity and molecular weight
 
     Args:
-        inputquery (Dict): _description_
-        fragchoice (Union[Dict,Set], optional): _description_. Defaults to {}.
-        similarity (bool, optional): _description_. Defaults to True.
-        fingerprint (str, optional): _description_. Defaults to "morgan".
-        morganradius (int, optional): _description_. Defaults to 2.
-        addHs (bool, optional): _description_. Defaults to True.
-        molwt (bool, optional): _description_. Defaults to True.
-        refquery (Dict, optional): _description_. Defaults to None.
-        ncpus (int, optional): _description_. Defaults to 16.
-
-    Raises:
-        Exception: _description_
-        Exception: _description_
+        inputquery (Dict): Input query dictionary with analogue pools
+        fragchoice (Union[Dict,Set,List], optional): Iterable or dictionary containing specific fragments to run the function for. Defaults to {}.
+        similarity (bool, optional): Boolean switch to determine if similarity calculations need to be run. Defaults to True.
+        fingerprint (str, optional): Fingerprint type. Defaults to "morgan". Can also be topological
+        morganradius (int, optional): Radius of morgan fingerprint. Defaults to 2.
+        addHs (bool, optional): Controls if hydrogens should be explicitly added when calculating similarity. Defaults to True.
+        molwt (bool, optional): Controls if molecular weight calculations are needed. Defaults to True.
+        refquery (Dict, optional): Past reference input query with similarity/mol wt data to reduce computation time. Defaults to None.
+        ncpus (int, optional): Number of CPUs to run function on. Defaults to 16, change based on system specifications. Defaults to 16.
 
     Returns:
-        Dict: _description_
+        Dict: Returns input query dictionary with similarity and/or molecular weight information
     """
-    '''
-    Takes an input query dictionary with analogue species pools and adds additional information such as
-    fingerprint similarity and molecular weight
-
-    Specify fragments under fragchoice if user wants to selectively apply the update (or leave blank if intent is to apply to all)
-    Specify similarity as true for calculation of fingerprint similarity (fingerprint user-defined as morgan or topological,
-    with user-defined morgan radius, addHs reflects whether hydrogens are considered or not)
-    Specify molwt as true if molecular weights need to be calculated
-    refquery refers to past user inputs that may have already computed results (to avoid computation as this is expensive)
-    ncpus indicates how many CPUs or cores for parallel execution
-
-    '''
     species = inputquery["species"]
     if refquery is not None:
-        if isinstance(refquery,str):
+        if isinstance(refquery, str):
             refquery = openpickle(refquery)
     for spec in species:
         for frag in species[spec]:
@@ -527,25 +511,35 @@ def updatequery(
 
 
 def getcombinedpool(
-    inputquery,
-    fragchoice={},
-    ST=None,
-    fingerprint="morgan",
-    morganradius=2,
-    MWT=None,
-    nomixtures=True,
-    res_format="list",
-):
+    inputquery: Dict,
+    fragchoice: Union[Dict, Set, List] = {},
+    ST: float = None,
+    fingerprint: str = "morgan",
+    morganradius: int = 2,
+    MWT: float = None,
+    nomixtures: bool = True,
+    res_format: str = "list",
+) -> Union[pd.DataFrame, List]:
     """
     Retrieves combined analogue pool across all fragments. Additional filters can be applied. Output is either dataframe with
     extensive information (compound ID, SMILES, count, fragment, and query species) or a list of analogue IDs
     depending on res_format (df and list respectively)
 
-    Leave fragchoice empty if all fragments need to be considered or specify which ones need to be retrieved
-    Specify nomixtures as True if mixtures need to be filtered out
-    Specify similarity (lower bound, based on fingerprint and morgan radius if morgan) and molecular weight threshold
-    (upper bound) under ST and MWT respectively
+    Args:
+        inputquery (Dict): Input query dictionary with analogue pools
+        fragchoice (Union[Dict, Set, List], optional): Iterable or dictionary containing specific fragments to run the function for. Defaults to {}.
+        ST (float, optional): Similarity threshold. All analogue species below this threshold will be removed. Defaults to None.
+        fingerprint (str, optional): Fingerprint type to be considered. Defaults to "morgan".
+        morganradius (int, optional): Radius of morgan fingerprint. Defaults to 2.
+        MWT (float, optional): Molecular weight threshold. All analogue species above this threshold will be removed. Defaults to None.
+        nomixtures (bool, optional): If True, all mixtures (SMILES with a '.' in them) will be removed. Defaults to True.
+        res_format (str, optional): Can be either "dataframe" or "list", will format the output combined analogue pool accordingly. Defaults to "list".
 
+    Raises:
+        CustomError: If thresholds are specified without prerequisite data
+
+    Returns:
+        Union[pd.DataFrame,List]: Either a dataframe or list of all analogue species
     """
     species = inputquery["species"]
     combinedpooldf = []
@@ -590,16 +584,32 @@ def getcombinedpool(
     else:
         return combinedpooldf2
 
+    """"""
+
+    """
+    
+    """
+
 
 def getCompPool(
-    DB, fragmentsmiles, SQL=False
-):  # For sql to work, must specify db connection under DB. SQL can be very fast or very slow (no consistency)
+    DB: Union[pd.DataFrame, sqlite3.Connection],
+    fragmentsmiles: Union[str, List],
+    SQL: bool = False,
+) -> pd.DataFrame:  # For sql to work, must specify db connection under DB. SQL can be very fast or very slow depending on read/write speeds
     """
     Retrieve analogue compounds for a given fragment SMILES (or list of fragment SMILES), given a database or SQL connection (DB)
+
+    Args:
+        DB (Union[pd.DataFrame, sqlite3.Connection]): Fragment database, either a dataframe or an SQlite connection
+        fragmentsmiles (str): Fragment smiles string or list of fragment smiles strings
+        SQL (bool, optional): _description_. Defaults to False.
+
+    Returns:
+        pd.DataFrame: _description_
     """
     #     DB=sqlite3.connect("/home/aa2133/Impurity-Project/Reaxys_Data/SQL/Reaxys_Data.db")
     #     cursor = DB.cursor()
-    if type(fragmentsmiles) == list:
+    if isinstance(fragmentsmiles, list):
         if not SQL:
             return DB.loc[DB.index.isin(fragmentsmiles, level=0)]
         else:
@@ -632,8 +642,7 @@ def getCompPool(
 
 
 def findfragsub(parent, patt, fragment=False, addHs=True, returnindices=False):
-    
-    '''
+    """
     Given a parent and pattern (patt) smiles, calculates if there is a substructure match or not and, optionally, returns
     atom index matches. Can also process mixtures, and will return a dictionary containing atom indices.
 
@@ -642,8 +651,8 @@ def findfragsub(parent, patt, fragment=False, addHs=True, returnindices=False):
     The addHs option is mainly to account for hydrogens but may not work if a fragment is passed in due to
     valence/sanitization errors. In these cases, False is returned.
     Specify returnindices as True if a list of matches needs to be retrieved for fragment with atom indices
-    
-    '''
+
+    """
     #     breakpoint()
     if "." in parent or "." in patt:  # mixture present
         if "." in parent:
@@ -858,7 +867,7 @@ def updatecombinedpool(
                 + catsmiles
                 + '''"'''
             )
-            dat = pd.read_sql_query(sql3, db)
+            dat = pd.read_sql_query(sql3,DB)
             dat.set_index("SubstanceID", inplace=True)
             catidx += list(dat.index)
         combinedpoolex = combinedpoolex.union(set(catidx))
