@@ -1,21 +1,19 @@
 # %load ./BalanceRxns.py
+from typing import List, Union
 import pandas as pd
-import rdkit
-from AnalgRxns import userefrxns
+from AnalgRxns import getspecdat_rxn, userefrxns
 from MainFunctions import CustomError, getfragments, getcompdict, initray, molfromsmiles
-import multiprocessing
-import time
 
 # from func_timeout import func_timeout, FunctionTimedOut
 from chempy import balance_stoichiometry
 import copy
-from collections import Counter
+from collections import Counter, OrderedDict
 from decimal import Decimal, ROUND_HALF_UP
 from rdkit import Chem  # Importing RDKit
 from rdkit.Chem import rdChemReactions  # Reaction processing
 
 # from rdkit.Chem.rdMolDescriptors import CalcMolFormula
-from MapRxns import checkrxn, maprxn
+from rxnmapper import RXNMapper
 from math import ceil
 import modin.pandas as mpd
 
@@ -24,7 +22,7 @@ def balance_analogue_(
     analoguerxns,
     refbalrxns=None,
     coefflim=6,
-    reaxys_update=True,
+    reaxys_updated=True,
     includesolv=True,
     usemapper=True,
     helpprod=True,
@@ -44,7 +42,7 @@ def balance_analogue_(
     else:
         idxreset = False
     idxcol = []
-    if reaxys_update:
+    if reaxys_updated:
         idxcol = ["ReactionID", "Instance"]
     else:
         idxcol = ["ReactionID"]
@@ -1397,39 +1395,520 @@ def resolvecandidates(
     return Rdata, candidates, msg
 
 
-def balance_rxn(rxnsmiles0, hc_prod={}, hc_react={}, coefflim=6, usemapper=True):
-    #     breakpoint()
+def maprxn(rxns: List[str]):
+    """
+    For a given list of reactions, rxns, returns mapped reactions with confidence scores.
+    Uses IBM transformer model.
+
+    Parameters
+    ----------
+    rxns : List[str]
+        List of reaction SMILES (no reactant/reagent split)
+
+    Returns
+    -------
+    Output : list
+        Mapped reactions with confidence scores
+
+           mapped_rxn: str
+               Mapped reaction SMARTS
+
+           confidence: str
+               Model confidence in the mapping rxn
+
+    ['Error']: list
+        If code doesn't run or mapper doesn't work
+    """
+
+    rxn_mapper = RXNMapper()
     try:
-        splitrxn = rxnsmiles0.split(">>")
-        if len(splitrxn) == 1:  # Only reactants specified
-            raise Exception
-        rcts = splitrxn[0].split(".")
-        prods = splitrxn[1].split(".")
-        rcts = [Chem.MolToSmiles(molfromsmiles(rct)) for rct in rcts]
-        prods = [Chem.MolToSmiles(molfromsmiles(prod)) for prod in prods]
+        return rxn_mapper.get_attention_guided_atom_maps(rxns)
     except Exception:
-        print(
-            "Please supply valid reaction smiles. Reactant.Reactant >> Product.Product"
-        )
-    rcts = Counter(rcts)
-    prods = Counter(prods)
-    Rdata = {}
-    Pdata = {}
-    for i, rct in enumerate(rcts):
-        Rdata.update(getcompdict(ID=i, smiles=rct))
-        Rdata[i]["count"] = rcts[rct]
-    for j, prod in enumerate(prods):
-        Pdata.update(getcompdict(ID=j, smiles=prod))
-        Pdata[j]["count"] = prods[prod]
-    addedspecies = [i for i in Rdata]
-    return balancerxn(
-        Rdata,
-        Pdata,
-        rxnsmiles0=rxnsmiles0,
-        addedspecies=addedspecies,
-        usemapper=usemapper,
-        hc_prod=hc_prod,
-        first=False,
-        hc_react=hc_react,
-        coefflim=coefflim,
-    )
+        return ["Error"]
+
+
+def gensmilesfreq(specdict, validate=True):
+    """
+    Generates smile frequency dictionary (Sometimes species have the same SMILES with different IDs eg. mixture vs pure)
+
+    """
+    smilesfreq = {}
+    for ID0 in specdict:
+        specsmiles = specdict[ID0]["smiles"]
+        specsmiles = specsmiles.split(".")
+        for specsmile in specsmiles:
+            if validate:
+                specsmile = Chem.MolToSmiles(molfromsmiles(specsmile))
+            if specsmile in smilesfreq:
+                smilesfreq[specsmile].extend([ID0])
+            else:
+                smilesfreq.update({specsmile: [ID0]})
+    return smilesfreq
+
+
+def updatespecdict(
+    refdict,
+    smilesfreq,
+    cleanmol,
+    mappedmol,
+    updateddict=OrderedDict({}),
+    mixtures={},
+    hcarriers=[],
+    updateall=True,
+):
+    """
+    Updates species dictionary based on given reactant and cleaned molecule from a reaction
+    hcarriers (list of hydrogen containing species involved in reaction but not mapped)
+    """
+    foundmatch = False
+    specsmiles = Chem.MolToSmiles(
+        molfromsmiles(Chem.MolToSmiles(cleanmol))
+    )  # Ensuring RDKit smiles
+    #     breakpoint()
+    if specsmiles not in smilesfreq:
+        ID0 = ""
+        msg = "Smiles discrepancy for species"
+    else:
+        idx = ""
+        msg = "Valid"
+        IDlist = smilesfreq[specsmiles]
+        mixtures_ = ["." in refdict[ID0]["smiles"] for ID0 in IDlist]
+        if len(IDlist) > 1:  # Try mixtures first
+            pure = [
+                ID0 for i, ID0 in enumerate(IDlist) if not mixtures_[i]
+            ]  # Pure matches
+            if any(mixtures):
+                for i, ID0 in enumerate(IDlist):
+                    if mixtures_[i] and ID0 in mixtures:
+                        if specsmiles in mixtures[ID0]:
+                            loccount = len(mixtures[ID0][specsmiles])
+                        else:
+                            loccount = 0
+                        if any(
+                            [
+                                len(mixtures[ID0][specsmiles_]) > loccount
+                                for specsmiles_ in mixtures[ID0]
+                            ]
+                        ):
+                            idx = i
+                            break
+                if not idx and not pure:
+                    for i, ID0 in enumerate(IDlist):
+                        if mixtures_[i] and ID0 not in mixtures:
+                            idx = i
+                            break
+            if not idx and pure:
+                for i, ID0 in enumerate(IDlist):
+                    if not mixtures_[i] and ID0 not in updateddict:
+                        idx = i
+                        break
+            if not idx:
+                idx = 0
+        else:
+            idx = 0
+        ID0 = IDlist[idx]
+        # New
+        if (
+            hcarriers
+            and ID0 not in hcarriers
+            and not any(
+                [atom.HasProp("molAtomMapNumber") for atom in mappedmol.GetAtoms()]
+            )
+        ):
+            return updateddict, mixtures, msg, ID0
+        # New
+        mixture = mixtures_[idx]
+        if updateall:
+            mappedsmiles = Chem.MolToSmiles(mappedmol)
+            if mixture:
+                if ID0 not in mixtures:
+                    updateddict.update({ID0: copy.deepcopy(refdict[ID0])})
+                    updateddict[ID0]["mixture"] = mixture
+                    mixtures.update({ID0: {specsmiles: [(mappedsmiles, cleanmol)]}})
+                elif specsmiles not in mixtures[ID0]:
+                    mixtures[ID0].update({specsmiles: [(mappedsmiles, cleanmol)]})
+                else:
+                    mixtures[ID0][specsmiles].extend([(mappedsmiles, cleanmol)])
+            else:
+                if ID0 not in updateddict:
+                    updateddict.update({ID0: copy.deepcopy(refdict[ID0])})
+                    updateddict[ID0]["mixture"] = mixture
+                    updateddict[ID0]["count"] = 1
+                    updateddict[ID0].update(
+                        {"mappedsmiles": [mappedsmiles], "cleanmol": [cleanmol]}
+                    )
+                else:
+                    updateddict[ID0]["count"] += 1
+                    updateddict[ID0]["mappedsmiles"].extend([mappedsmiles])
+                    updateddict[ID0]["cleanmol"].extend([cleanmol])
+        else:
+            if mixture:
+                if ID0 not in mixtures:
+                    updateddict.update({ID0: copy.deepcopy(refdict[ID0])})
+                    updateddict[ID0]["mixture"] = mixture
+                    mixtures.update({ID0: {specsmiles: [()]}})
+                elif specsmiles not in mixtures[ID0]:
+                    mixtures[ID0].update({specsmiles: [()]})
+                else:
+                    mixtures[ID0][specsmiles].extend([()])
+            else:
+                if ID0 not in updateddict:
+                    updateddict.update({ID0: copy.deepcopy(refdict[ID0])})
+                    updateddict[ID0]["mixture"] = mixture
+                    updateddict[ID0]["count"] = 1
+                else:
+                    updateddict[ID0]["count"] += 1
+    return updateddict, mixtures, msg, ID0
+
+
+def checkrxn(
+    mappedrxn,
+    Rdata={},
+    Pdata={},
+    ordered=True,
+    updateall=True,
+    removeunmapped=True,
+    mandrcts=[],
+    mandprods=[],
+    hcarriers=[],
+):  # Assume same rxn smiles stored next to each other
+    """
+    Checks reaction, updating mapped and clean molecules, removing unmapped species
+
+    """
+
+    #     breakpoint()
+    rdrxn = rdChemReactions.ReactionFromSmarts(mappedrxn, useSmiles=True)
+    cleanrxn = copy.copy(rdrxn)
+    rdChemReactions.RemoveMappingNumbersFromReactions(cleanrxn)
+    if ordered:
+        LHSdata = OrderedDict({})
+        RHSdata = OrderedDict({})
+    else:
+        LHSdata = {}
+        RHSdata = {}
+    msgr = []
+    msgp = []
+    # Updating LHSdata
+    if Rdata:
+        rsmilesfreq = gensmilesfreq(Rdata)
+        smilesmismatch = []
+        rmixtures = {}
+        mismatch = False
+        for ID, rct in enumerate(cleanrxn.GetReactants()):
+            mappedmol = rdrxn.GetReactants()[ID]
+            formula = Chem.rdMolDescriptors.CalcMolFormula(rct)
+            if removeunmapped:
+                if (
+                    any(
+                        [
+                            atom.HasProp("molAtomMapNumber")
+                            for atom in mappedmol.GetAtoms()
+                        ]
+                    )
+                    or formula == "H2"
+                    or hcarriers
+                ):  # Confirmed, mapped reactant
+                    LHSdata, rmixtures, msg_, ID0 = updatespecdict(
+                        Rdata,
+                        rsmilesfreq,
+                        rct,
+                        mappedmol,
+                        updateddict=LHSdata,
+                        mixtures=rmixtures,
+                        updateall=updateall,
+                        hcarriers=hcarriers,
+                    )
+                    if msg_ != "Valid":
+                        #                         if ID0 not in smilesmismatch:
+                        #                             smilesmismatch+=[ID0]
+                        mismatch = True
+            else:
+                LHSdata, rmixtures, msg_, ID0 = updatespecdict(
+                    Rdata,
+                    rsmilesfreq,
+                    rct,
+                    mappedmol,
+                    updateddict=LHSdata,
+                    mixtures=rmixtures,
+                    updateall=updateall,
+                    hcarriers=hcarriers,
+                )
+                if msg_ != "Valid":
+                    #                     if ID0 not in smilesmismatch:
+                    #                         smilesmismatch+=[ID0]
+                    mismatch = True
+        if mismatch:
+            smilesmismatch = [
+                ID0 for ID0 in Rdata if ID0 not in LHSdata and ID0 not in rmixtures
+            ]
+            if smilesmismatch:
+                msgr += [
+                    "Smiles discrepancy for LHS species: "
+                    + ", ".join([str(ID) for ID in smilesmismatch])
+                ]
+            else:
+                msgr += ["Smiles discrepancy for LHS species"]
+        #         breakpoint()
+        if rmixtures:
+            msgr += [
+                "Mixture detected for LHS species: "
+                + ",".join([str(ID) for ID in rmixtures])
+            ]
+            for ID0 in rmixtures:
+                localcounts = [
+                    int(Counter(rsmilesfreq[mixsmiles])[ID0])
+                    for mixsmiles in rmixtures[ID0]
+                ]
+                numinsts = [
+                    len(rmixtures[ID0][mixsmiles]) for mixsmiles in rmixtures[ID0]
+                ]
+                lb = [0 for j in range(len(numinsts))]
+                ub = [0 for j in range(len(numinsts))]
+                div = [
+                    int(ceil(numinst / localcount))
+                    for numinst, localcount in zip(numinsts, localcounts)
+                ]
+                count = max(div)
+                if updateall:
+                    LHSdata[ID0].update(
+                        {"mappedsmiles": [], "cleanmol": [], "unmappedmix": []}
+                    )
+                    for i in range(count):
+                        mappedsmiles = []
+                        unmappedsmiles = []
+                        cleanmol = []
+                        for j, mixsmiles in enumerate(rmixtures[ID0]):
+                            ub_ = min(numinsts[j], localcounts[j])
+                            ub[j] = ub_ + lb[j]
+                            mappedlist = rmixtures[ID0][mixsmiles][lb[j] : ub[j]]
+                            mappedsmiles += [comb[0] for comb in mappedlist]
+                            cleanmol += [comb[1] for comb in mappedlist]
+                        mappedsmiles = tuple(mappedsmiles)
+                        cleanmol = tuple(cleanmol)
+                        unmappedsmiles = tuple(
+                            [
+                                mixsmiles
+                                for mixsmiles in rsmilesfreq
+                                for k in range(
+                                    int(Counter(rsmilesfreq[mixsmiles])[ID0])
+                                )
+                                if mixsmiles in Rdata[ID0]["smiles"]
+                                if mixsmiles not in rmixtures[ID0]
+                            ]
+                        )
+                        LHSdata[ID0]["mappedsmiles"].extend([mappedsmiles])
+                        LHSdata[ID0]["cleanmol"].extend([cleanmol])
+                        LHSdata[ID0]["unmappedmix"].extend([unmappedsmiles])
+                        lb = copy.deepcopy(ub)
+                LHSdata[ID0]["count"] = count
+        if removeunmapped:
+            rem = Counter()
+            Rspecies = Counter(
+                [ID0 for ID0 in Rdata for _ in range(Rdata[ID0]["count"])]
+            )
+            LHSspecies = Counter(
+                [ID0 for ID0 in LHSdata for _ in range(LHSdata[ID0]["count"])]
+            )
+            rem.update(Rspecies)
+            rem.subtract(LHSspecies)
+            #             removedmandrcts=[ID0 for ID0 in rem if ID0 in mandrcts if ID0 not in LHSspecies]
+            #             removedrcts=[ID0 for ID0 in rem if ID0 not in removedmandrcts if ID0 not in smilesmismatch if ID0 in Rspecies if ID0 not in LHSspecies]
+            removedrcts = [
+                ID0
+                for ID0 in rem
+                if ID0 in Rspecies
+                if ID0 not in LHSspecies
+                if ID0 not in smilesmismatch
+            ]
+            removedmandrcts = [ID0 for ID0 in removedrcts if ID0 in mandrcts]
+            # New
+            removedmandrcts = list(
+                set(removedmandrcts).union(
+                    {mandrct for mandrct in mandrcts if mandrct not in LHSspecies}
+                )
+            )
+            # New
+            runmapped = [
+                ID0
+                for ID0 in rem
+                if rem[ID0] > 0
+                if ID0 not in removedrcts
+                if ID0 not in smilesmismatch
+            ]  #!=0
+            if removedmandrcts:
+                msgr += [
+                    "Mandatory species unmapped from LHS: "
+                    + ", ".join([str(ID) for ID in removedmandrcts])
+                ]
+                removedrcts = [ID0 for ID0 in removedrcts if ID0 not in removedmandrcts]
+            if removedrcts:
+                msgr += [
+                    "Unmapped species from LHS: "
+                    + ", ".join([str(ID) for ID in removedrcts])
+                ]
+            if runmapped:
+                msgr += [
+                    "Unmapped species instances from LHS: "
+                    + ", ".join([str(ID) for ID in runmapped])
+                ]
+    if Pdata:
+        #         breakpoint()
+        psmilesfreq = gensmilesfreq(Pdata)
+        smilesmismatch = []
+        pmixtures = {}
+        mismatch = False
+        for ID, prod in enumerate(cleanrxn.GetProducts()):
+            mappedmol = rdrxn.GetProducts()[ID]
+            #             formula=rdkit.Chem.rdMolDescriptors.CalcMolFormula(prod)
+            if removeunmapped:
+                if any(
+                    [atom.HasProp("molAtomMapNumber") for atom in mappedmol.GetAtoms()]
+                ):  # Confirmed, mapped reactant
+                    RHSdata, pmixtures, msg_, ID0 = updatespecdict(
+                        Pdata,
+                        psmilesfreq,
+                        prod,
+                        mappedmol,
+                        updateddict=RHSdata,
+                        mixtures=pmixtures,
+                        updateall=updateall,
+                    )
+                    if msg_ != "Valid":
+                        #                         if ID0 not in smilesmismatch:
+                        #                             smilesmismatch+=[ID0]
+                        mismatch = True
+            else:
+                RHSdata, pmixtures, msg_, ID0 = updatespecdict(
+                    Pdata,
+                    psmilesfreq,
+                    prod,
+                    mappedmol,
+                    updateddict=RHSdata,
+                    mixtures=pmixtures,
+                    updateall=updateall,
+                )
+                if msg_ != "Valid":
+                    #                     if ID0 not in smilesmismatch:
+                    #                         smilesmismatch+=[ID0]
+                    mismatch = True
+        if mismatch:
+            smilesmismatch = [
+                ID0 for ID0 in Pdata if ID0 not in RHSdata and ID0 not in pmixtures
+            ]
+            if smilesmismatch:
+                msgp += [
+                    "Smiles discrepancy for RHS species: "
+                    + ", ".join([str(ID) for ID in smilesmismatch])
+                ]
+            else:
+                msgp += ["Smiles discrepancy for RHS species"]
+        if pmixtures:
+            msgp += [
+                "Mixture detected for RHS species: "
+                + ",".join([str(ID) for ID in pmixtures])
+            ]
+            #             breakpoint()
+            for ID0 in pmixtures:
+                localcounts = [
+                    int(Counter(psmilesfreq[mixsmiles])[ID0])
+                    for mixsmiles in pmixtures[ID0]
+                ]
+                numinsts = [
+                    len(pmixtures[ID0][mixsmiles]) for mixsmiles in pmixtures[ID0]
+                ]
+                lb = [0 for j in range(len(numinsts))]
+                ub = [0 for j in range(len(numinsts))]
+                div = [
+                    int(ceil(numinst / localcount))
+                    for numinst, localcount in zip(numinsts, localcounts)
+                ]
+                count = max(div)
+                if updateall:
+                    RHSdata[ID0].update(
+                        {"mappedsmiles": [], "cleanmol": [], "unmappedmix": []}
+                    )
+                    for i in range(count):
+                        mappedsmiles = []
+                        unmappedsmiles = []
+                        cleanmol = []
+                        for j, mixsmiles in enumerate(pmixtures[ID0]):
+                            ub_ = min(numinsts[j], localcounts[j])
+                            ub[j] = ub_ + lb[j]
+                            mappedlist = pmixtures[ID0][mixsmiles][lb[j] : ub[j]]
+                            mappedsmiles += [comb[0] for comb in mappedlist]
+                            cleanmol += [comb[1] for comb in mappedlist]
+                        mappedsmiles = tuple(mappedsmiles)
+                        cleanmol = tuple(cleanmol)
+                        unmappedsmiles = tuple(
+                            [
+                                mixsmiles
+                                for mixsmiles in psmilesfreq
+                                for k in range(
+                                    int(Counter(psmilesfreq[mixsmiles])[ID0])
+                                )
+                                if mixsmiles in Pdata[ID0]["smiles"]
+                                if mixsmiles not in pmixtures[ID0]
+                            ]
+                        )
+                        RHSdata[ID0]["mappedsmiles"].extend([mappedsmiles])
+                        RHSdata[ID0]["cleanmol"].extend([cleanmol])
+                        RHSdata[ID0]["unmappedmix"].extend([unmappedsmiles])
+                        lb = copy.deepcopy(ub)
+                RHSdata[ID0]["count"] = count
+        if removeunmapped:
+            rem = Counter()
+            Pspecies = Counter(
+                [ID0 for ID0 in Pdata for _ in range(Pdata[ID0]["count"])]
+            )
+            RHSspecies = Counter(
+                [ID0 for ID0 in RHSdata for _ in range(RHSdata[ID0]["count"])]
+            )
+            rem.update(Pspecies)
+            rem.subtract(RHSspecies)
+            #             removedmandprod=[ID0 for ID0 in rem if ID0 in mandprods if ID0 not in RHSspecies]
+            #             removedprods=[ID0 for ID0 in rem if ID0 not in removedmandprod if ID0 not in smilesmismatch if ID0 in Pspecies if ID0 not in RHSspecies]
+            removedprods = [
+                ID0
+                for ID0 in rem
+                if ID0 in Pspecies
+                if ID0 not in RHSspecies
+                if ID0 not in smilesmismatch
+            ]
+            removedmandprods = [ID0 for ID0 in removedprods if ID0 in mandprods]
+            punmapped = [
+                ID0
+                for ID0 in rem
+                if rem[ID0] > 0
+                if ID0 not in removedprods
+                if ID0 not in smilesmismatch
+            ]  #!=0
+            if removedmandprods:
+                msgp += [
+                    "Mandatory species unmapped from RHS: "
+                    + ", ".join([str(ID) for ID in removedmandprods])
+                ]
+                removedprods = [
+                    ID0 for ID0 in removedprods if ID0 not in removedmandprods
+                ]
+            if removedprods:
+                msgp += [
+                    "Unmapped species from RHS: "
+                    + ", ".join([str(ID) for ID in removedprods])
+                ]
+            if punmapped:
+                msgp += [
+                    "Unmapped species instances from RHS: "
+                    + ", ".join([str(ID) for ID in punmapped])
+                ]
+    msg = msgr + msgp
+    if not msg:
+        msg = "Valid"
+    else:
+        msg = ", ".join(msg)
+    return LHSdata, RHSdata, msg
+
+
+# balance_rxn(
+#     "CC(=O)OC(C)=O.O=c1oc2cc(O)ccc2c2[nH]c3cc(O)ccc3c12>>CC(=O)Oc1ccc2c(c1)[nH]c1c3ccc(OC(C)=O)cc3oc(=O)c21"
+# )

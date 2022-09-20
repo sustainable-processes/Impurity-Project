@@ -45,8 +45,8 @@ datasources = {
     "fraggroupssource": masterdbreadpath + "fragfreq.pickle",
     "fragdbsource": masterdbreadpath + "fragdb.pickle",
     "rxnsource": masterdbreadpath + "ReactionDB.pickle",
-    "exemptiondir": masterdbreadpath + "PotCatList.pickle",
-    "unresolveddir": masterdbreadpath + "UnresolvedIDs.pickle",
+    "exemptionsource": masterdbreadpath + "PotCatList.pickle",
+    "unresolvedsource": masterdbreadpath + "UnresolvedIDs.pickle",
     "substancesource": masterdbreadpath + "SubstanceSmiles.pickle",
     "SQLdatsource": masterdbreadpath + "SQL/Reaxys_Data.db",
 }
@@ -56,9 +56,10 @@ masterparams = {
     "showresults": False,
     "writetofile": True,
     "reaxys_update": True,
+    "reaxys_updated": True,
 }
 
-step2params = {"debug": False, "iqfilename": "inputquery"}
+step2params = {"debug": False, "iqfilename": "inputquery", "expand": 1}
 
 step3params = {
     "inputquery": None,
@@ -96,7 +97,6 @@ step4params = {
 }
 
 step5params = {
-    "unresolvedids": None,
     "analoguerxnsfilt": None,
     "analoguerxnsfiltfilename": "analoguerxnsfilt",
     "refanaloguerxns_updated": None,
@@ -243,20 +243,26 @@ def main(
             if key in IP:
                 IP[key] = val
     #     breakpoint()
-    # Creating directories to store output (Edit if any changes)
-    stages = ["DataMining", "DataProcessing", "ImpurityPrediction", "ImpurityRanking"]
-    casedir = IP["folderwritepath"] + casename + "/"
-    dmdir = casedir + stages[0] + "/"
-    IP["dmdir"] = dmdir
-    dpdir = casedir + stages[1] + "/"
-    IP["dpdir"] = dpdir
-    ipdir = casedir + stages[2] + "/"
-    IP["ipdir"] = ipdir
-    irdir = casedir + stages[3] + "/"
-    IP["irdir"] = irdir
-    for fdir in [dmdir, dpdir, ipdir, irdir]:
-        if not os.path.exists(fdir):
-            os.makedirs(fdir)
+    # Creating directories to store output (Edit if any changes) if writetofile is True
+    if IP["writetofile"]:
+        stages = [
+            "DataMining",
+            "DataProcessing",
+            "ImpurityPrediction",
+            "ImpurityRanking",
+        ]
+        casedir = IP["folderwritepath"] + casename + "/"
+        dmdir = casedir + stages[0] + "/"
+        IP["dmdir"] = dmdir
+        dpdir = casedir + stages[1] + "/"
+        IP["dpdir"] = dpdir
+        ipdir = casedir + stages[2] + "/"
+        IP["ipdir"] = ipdir
+        irdir = casedir + stages[3] + "/"
+        IP["irdir"] = irdir
+        for fdir in [dmdir, dpdir, ipdir, irdir]:
+            if not os.path.exists(fdir):
+                os.makedirs(fdir)
     import gc
 
     gc.collect()
@@ -568,10 +574,10 @@ def main(
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%   Step functions  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 def step2(userinput, IP):
     if userinput:  # User has supplied a reaction smiles string
-        if not type(userinput) == str:
+        if not isinstance(userinput, str):
             raise CustomError("Please provide a query reaction smiles")
         inputsmiles = userinput
-        inputquery = processquery(inputsmiles, debug=IP["debug"])
+        inputquery = processquery(inputsmiles, expand=IP["expand"], debug=IP["debug"])
         if IP["writetofile"]:
             writepickle(inputquery, IP["dmdir"], IP["iqfilename"])
         IP["inputquery"] = inputquery
@@ -670,10 +676,16 @@ def step4(IP):  # MEMORY INTENSIVE
             combinedpool = openpickle(
                 IP["dmdir"] + IP["combinedpoolfilename"] + ".pickle"
             )
-        exemptionlist = openpickle(
-            IP["exemptiondir"]
-        )  # Catalysts misclassified as reagents (uncertain)
-        IP["exemptionlist"] = exemptionlist
+        if (
+            IP["exemptionsource"] or IP["exemptionsource"] is not None
+        ):  # Catalysts misclassified as reagents (uncertain)
+            if isinstance(IP["exemptionsource"], str):
+                exemptionlist = openpickle(IP["exemptionsource"])
+            else:
+                exemptionlist = IP["exemptionsource"]
+            IP["exemptionlist"] = exemptionlist
+        else:
+            exemptionlist = []
         combinedpoolex = updatecombinedpool(combinedpool, exemptionlist=exemptionlist)
         if IP["writetofile"]:
             writepickle(combinedpoolex, IP["dmdir"], IP["combinedpoolexfilename"])
@@ -715,12 +727,16 @@ def step5(IP):  # MEMORY INTENSIVE
                 IP["dmdir"] + IP["analoguerxnsfilename"] + ".pickle"
             )
         if exemptionlist is None:
-            exemptionlist = openpickle(IP["exemptiondir"])
-        unresolvedids = openpickle(IP["unresolveddir"])
+            exemptionlist = openpickle(IP["exemptionsource"])
+        if IP["unresolvedsource"] or IP["unresolvedsource"] is not None:
+            if isinstance(IP["unresolvedsource"], str):
+                unresolvedids = openpickle(IP["unresolvedsource"])
+            else:
+                unresolvedids = IP["unresolvedsource"]
         analoguerxnsfilt = filteranaloguerxns(
             analoguerxns,
             unresolvedids,
-            reaxys_update=IP["reaxys_update"],
+            reaxys_updated=IP["reaxys_updated"],
             exemptionlist=exemptionlist,
         )
         if IP["writetofile"]:
@@ -736,7 +752,7 @@ def step5(IP):  # MEMORY INTENSIVE
         includesolv=IP["includesolv"],
         ncpus=IP["ncpus"],
         SQL=IP["SQL"],
-        reaxys_update=IP["reaxys_update"],
+        reaxys_updated=IP["reaxys_updated"],
         hc_Dict=IP["hc_Dict"],
         hc_rct=IP["hc_rct"],
         refanaloguerxns=IP["refanaloguerxns_updated"],
@@ -763,7 +779,7 @@ def step6(IP):
         balrxns, analoguerxnsbal = balance_analogue_(
             analoguerxns_updated,
             refbalrxns=IP["refbalrxns"],
-            reaxys_update=IP["reaxys_update"],
+            reaxys_updated=IP["reaxys_updated"],
             includesolv=IP["includesolv"],
             helpprod=IP["helpprod"],
             helpreact=IP["helpreact"],
@@ -809,7 +825,7 @@ def step6(IP):
 
 def step7(IP):
     #     breakpoint()
-    analoguerxnsbalfilt = IP["analoguerxnsbal"]
+    analoguerxnsbalfilt = IP["analoguerxnsbalfilt"]
     analoguerxnsmapped = IP["analoguerxnsmapped"]
     analoguerxnsparsed = IP["analoguerxnsparsed"]
     analoguerxnsparsedfilt = IP["analoguerxnsparsedfilt"]
@@ -825,7 +841,7 @@ def step7(IP):
                     analoguerxnsmapped = map_rxns(
                         analoguerxnsbalfilt,
                         refmappedrxns=IP["refmappedrxns"],
-                        reaxys_update=IP["reaxys_update"],
+                        reaxys_updated=IP["reaxys_updated"],
                         ncpus=IP["ncpus"],
                     )
                     if IP["writetofile"]:
@@ -840,7 +856,7 @@ def step7(IP):
                 analoguerxnsparsed = checkrxns(
                     analoguerxnsmappedfilt,
                     refparsedrxns=IP["refparsedrxns"],
-                    reaxys_update=IP["reaxys_update"],
+                    reaxys_updated=IP["reaxys_updated"],
                     ncpus=IP["ncpus"],
                 )
                 if IP["writetofile"]:
@@ -951,7 +967,7 @@ def step7(IP):
             IP["dpdir"] + IP["analoguerxnsassignedfiltfilename"] + ".pickle",
         )
     if IP["showresults"]:
-        IP["analoguerxnsassignedfilt"] = analoguerxnsassigned
+        IP["analoguerxnsassignedfilt"] = analoguerxnsassignedfilt
     print("Step 7 complete")
     return IP
 
@@ -1119,7 +1135,7 @@ def step11(IP):
             analoguerxns_updated,
             inputquery,
             includesolv=IP["includesolv"],
-            reaxys_update=IP["reaxys_update"],
+            reaxys_updated=IP["reaxys_updated"],
             hc_prod=IP["hc_Dict"],
         )
         if IP["writetofile"]:
@@ -1167,7 +1183,10 @@ def step12(IP):
     )
     impfinalfilt["Relevance_morgan_rctonly"] = impfinalfilt_rctonly["Relevance_morgan"]
     impfinalfilt = standardize(
-        impfinalfilt, reaxys_update=IP["reaxys_update"], ncpus=IP["ncpus"], restart=True
+        impfinalfilt,
+        reaxys_updated=IP["reaxys_updated"],
+        ncpus=IP["ncpus"],
+        restart=True,
     )
     if IP["writetofile"]:
         pd.to_pickle(impfinalfilt, IP["irdir"] + IP["impfinalfiltfilename"] + ".pickle")
@@ -1194,7 +1213,7 @@ def step13(IP, conditions=[], catalyst=[]):
         impfinalfilt4 = catfilter(
             impfinalfilt3,
             IP["substancesource"],
-            IP["unresolveddir"],
+            IP["unresolvedsource"],
             catalyst=catalyst,
             useray=False,
         )

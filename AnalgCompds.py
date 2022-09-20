@@ -29,7 +29,7 @@ def getCarrierFrags0(
 
     Args:
         userinput (Union[str,Chem.rdchem.Mol]): SMILES of species or rdkit mol object
-        expand (bool, optional): Nearest neighbors to expand functional group to. Defaults to 1.
+        expand (bool, optional): Number of neighboring atoms to expand functional group to. Defaults to 1.
         resFormat (str, optional): Result type, either 'smarts' or 'smiles. Defaults to 'smarts'.
         addHs (bool, optional): If true, hydrogens will be considered in generation of fragment, recommended as true
         otherwise terminal atoms of a molecule are not differentiated with other atoms. Defaults to True.
@@ -148,7 +148,7 @@ def processquery(
 
     Args:
         userinput (str): Reaction SMILES to process containing query species
-        expand (int, optional): Nearest neighbors to expand identified functional group to for generation of carrier fragments for each query species in reaction. Defaults to 1.
+        expand (int, optional): Number of neighboring atoms to expand identified functional group to for generation of carrier fragments for each query species in reaction. Defaults to 1.
         refquery (Dict, optional): Past reference outputs from the function. Any common query species data will be reused, reducing computation time. Defaults to None.
         debug (bool, optional):  Specify debug as true for feedback and opportunity to manually specify carrier fragments for query species. Users have the option of either
         manually specifying an expansion number of fragment smiles/smarts as comma separated strings. Defaults to False.
@@ -584,12 +584,6 @@ def getcombinedpool(
     else:
         return combinedpooldf2
 
-    """"""
-
-    """
-    
-    """
-
 
 def getCompPool(
     DB: Union[pd.DataFrame, sqlite3.Connection],
@@ -867,7 +861,7 @@ def updatecombinedpool(
                 + catsmiles
                 + '''"'''
             )
-            dat = pd.read_sql_query(sql3,DB)
+            dat = pd.read_sql_query(sql3, DB)
             dat.set_index("SubstanceID", inplace=True)
             catidx += list(dat.index)
         combinedpoolex = combinedpoolex.union(set(catidx))

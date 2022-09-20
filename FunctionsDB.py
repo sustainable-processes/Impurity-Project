@@ -2,18 +2,30 @@
 
 
 import copy
-from MainFunctions import writepickle
+from MainFunctions import writepickle, initray
 from rdkit import Chem  # Importing RDKit
 from FindFunctionalGroups import identify_functional_groups as IFG
 import os
 import dask.dataframe as dd
 import dask.bag as db
 import pandas as pd
+from typing import List, Dict, Union, Tuple
+from AnalgCompds import getCarrierFrags0
+import modin.pandas as mpd
 
 #%% Building basic substance database
 
 
-def info(molfile):
+def info(molfile: str) -> Union[Tuple[Chem.rdchem.Mol, str], str]:
+    """
+    Processes a molfile address of a species and returns either a tuple of the SMILES and the mol object, or the address if the mol object is not valid.
+
+    Args:
+        molfile (str): molfile address of the species.
+
+    Returns:
+        Union[Tuple[Chem.rdchem.Mol, str], str]: Either a tuple of the SMILES and the mol object, or the address if the mol object is not valid.
+    """
     mol = Chem.MolFromMolFile(molfile)
     if mol:
         Chem.SanitizeMol(mol)
@@ -24,7 +36,18 @@ def info(molfile):
         return molfile
 
 
-def basic(ID, folder):
+def basic(ID: str, folder: str) -> Dict:
+    """
+    Based on the species ID and folder location, returns a dictionary of species information by processing the molfile.
+    The molfile needs to be located in folder+os.sep+ID address, and will be processed by RDKit.
+    Args:
+        ID (str): Reaxys ID of the species.
+        folder (str): Folder address of the species mol file on the server
+
+    Returns:
+        Dict: Dictionary of species information with SubstanceID, MolFileAddress, and Error if present
+    """
+
     if str.isdecimal(ID):
         molfileaddress = folder + os.sep + ID
         try:
@@ -56,268 +79,166 @@ def basic(ID, folder):
     return compaddrs
 
 
-def basicgroup(molfilelist, folder):
+def basicgroup(molfilelist: List[str], folder: str) -> List[Dict]:
+    """
+    Invokes basic for each ID in molfilelist and returns a list of dictionaries of species information.
+
+    Args:
+        molfilelist (List[str]): List of Reaxys IDs to be processed
+        folder (str): Folder address
+
+    Returns:
+        List[Dict]: List of dictionaries of species information
+    """
     return [basic(ID, folder) for ID in molfilelist]
 
 
-def substancedblist(folderName, partitions):
+def substancedblist(folderName: str, partitions: int) -> List[Dict]:
+    """
+    Invoke basicgroup for folder and returns a list of dictionaries of species information.
+
+    Args:
+        folderName (str): Folder address
+        partitions (int): Number of partitions to split folder contents into.
+
+    Returns:
+        List[Dict]: List of dictionaries of species information
+    """
     dem = os.listdir(folderName)
     b = db.from_sequence(dem, npartitions=partitions)
     dflist = b.map_partitions(basicgroup, folderName).compute()
     return dflist
 
 
-#%% Fragment detection
-def getCarrierFrags0(smi, expand=1, userinput="smiles", resFormat="smarts", addHs=True):
-    """
-    str (smiles), int -> list (str_smiles/smarts)
-    smi: str, smiles of a compound
-    size: Level to expand functional group by (eg./ 1 will expand to first degree neighbours, 2 will expand to second degree neighbors etc.)
-    resFormat: 'smiles' or 'smarts'
-    addHs: bool, if True H will be consider for generation of substructure, recommend True
-            otherwise terminal atoms of a molecule are not differentiated with other atoms
-    this function return list of strings of smarts representing carrier frags with miniSize of size
-    a carrier frag carries a functional group defined by using Ertl's method
-    find out the bonds to cut define a cutter to cut out the target fragments based on bonds to cut
-    1) get a list of function groups using IFG
-    2) if IFG list empty meaning no functional groups, directly return compound smiles
-    3) expand to nearest neighbors based on expand value
-    """
-    if userinput == "smiles":
-        mol = Chem.MolFromSmiles(smi)
-        Chem.SanitizeMol(mol)
-        mol.UpdatePropertyCache(strict=False)
-    else:
-        mol = smi
-    if addHs:
-        mol = Chem.AddHs(mol)
-    # -- get the list of functional groups FG
-    # e.g., [IFG(atomIds=(1, 4, 7), atoms='NC=O', type='cNC(C)=O'), IFG(atomIds=(10,), atoms='O', type='cO')]
-    IFG_ls = IFG(mol)
-    # if IFG_ls is empty, directly return this compounds
-    if len(IFG_ls) == 0:
-        if resFormat == "smiles":
-            if userinput != "smiles":
-                return Chem.MolToSmiles(mol)
-            else:
-                return smi
-        elif resFormat == "smarts":
-            if userinput != "smiles":
-                return Chem.MolToSmarts(mol)
-            else:
-                return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
-    # -- get atomIDs (FGs_atomIDs_expan) and terminalAtomIDs (FGs_terminal_atomIDs) for all frags
-    FGs_atomIDs = [_.atomIds for _ in IFG_ls]  # e.g., [(1, 4, 7), ...]
-    n_FGs = len(FGs_atomIDs)
-    # expan all FGs that < size # e.g., [[1, 4, 7, 8, 9], ...]
-    FGs_atomIDs_expan = [None] * n_FGs
-    # terminal atoms: atoms on which bonds to cut will be searched
-    # [[2, 3, 8], ...] or [[], [], ...], note [2, 3, 8] are terminal of comp not frag
-    FGs_terminal_atomIDs = [None] * n_FGs
-    for i in range(n_FGs):
-        # initialization before search and expand fragments
-        FG_atomIDs = list(FGs_atomIDs[i])  # e.g., [1, 4, 7]
-        FG_size = len(FG_atomIDs)
-        FG_terminal_atomIDs = (
-            []
-        )  # e.g., [2, 3, 8] or [], HNO3 or C=O -> [] Terminal IDs of fragments
-        for atomID in FG_atomIDs:
-            neis_IDs = [_.GetIdx() for _ in mol.GetAtomWithIdx(atomID).GetNeighbors()]
-            if len(set(neis_IDs) - set(FG_atomIDs)) != 0:
-                FG_terminal_atomIDs = FG_terminal_atomIDs + [atomID]
-        if (expand == 0) | (len(FG_terminal_atomIDs) == 0):
-            # make sure all elements in FGs_atomIDs_expan are lists
-            FGs_atomIDs_expan[i] = FG_atomIDs
-            FGs_terminal_atomIDs[i] = FG_terminal_atomIDs
-            # case 3 still could be [] even if FG_size >= size, though less likely
-        else:
-            FG_expan_atomIDs = copy.deepcopy(FG_atomIDs)  # e.g., [1, 4, 7]
-            # max repeat size times, since repeat size should reach the size
-            for rep in range(expand):
-                FG_expan_atomIDs_old = copy.deepcopy(FG_expan_atomIDs)
-                # not all atoms need be searched for neis, only ones not in FG_expan_atomIDs for each epoch
-                for atomID in FG_terminal_atomIDs:
-                    neis_IDs = [
-                        _.GetIdx() for _ in mol.GetAtomWithIdx(atomID).GetNeighbors()
-                    ]
-                    FG_expan_atomIDs = FG_expan_atomIDs + neis_IDs
-                FG_expan_atomIDs = list(set(FG_expan_atomIDs))
-                FG_terminal_atomIDs = list(
-                    set(FG_expan_atomIDs) - set(FG_expan_atomIDs_old)
-                )
-                FGs_atomIDs_expan[i] = FG_expan_atomIDs
-                FGs_terminal_atomIDs[i] = FG_terminal_atomIDs  # [] case 2
-                if (
-                    len(FG_terminal_atomIDs) == 0
-                ):  # cannot expand due to small comp size
-                    break  # for expan of next FG
-    if len(FGs_terminal_atomIDs[0]) == 0:
-        if resFormat == "smiles":
-            if userinput != "smiles":
-                return Chem.MolToSmiles(mol)
-            else:
-                return smi
-        elif resFormat == "smarts":
-            if userinput != "smiles":
-                return Chem.MolToSmarts(mol)
-            else:
-                return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
-    else:
-        FGs_strs = []  # smiles or smarts
-        for FG_atomIDs in FGs_atomIDs_expan:
-            if resFormat == "smiles":
-                FGs_str = Chem.MolFragmentToSmiles(mol, FG_atomIDs, canonical=True)
-                FGs_strs = FGs_strs + [FGs_str]
-            elif resFormat == "smarts":
-                FGs_str = Chem.MolFragmentToSmarts(
-                    mol, FG_atomIDs, isomericSmarts=False
-                )
-                FGs_strs = FGs_strs + [FGs_str]
-        return FGs_strs
-
-
-def getCarrierFrags(
-    smi, size, resFormat="smarts", addHs=True
-):  # Old carrier fragment extraction algorithm
-    """
-    str (smiles), int -> list (str_smiles/smarts)
-    smi: str, smiles of a compound
-    size: size of carrier fragments, number atoms
-    resFormat: 'smiles' or 'smarts'
-    addHs: bool, if True H will be consider for generation of substructure, recommend True
-            otherwise terminal atoms of a molecule are not differentiated with other atoms
-    this function return list of strings of smarts representing carrier frags with miniSize of size
-    a carrier frag carries a functional group defined by using Ertl's method
-    find out the bonds to cut define a cutter to cut out the target fragments based on bonds to cut
-    1) get a list of function groups using IFG
-    2) if IFG list empty meaning no functional groups, directly return compound smiles
-    3) evaluate the size of current fragment,
-       if frag_size >= size, directly return the comp smile
-       if frag_size < miniSizeFrag, expand the fragment by searching for neighors, only use terminal atoms to search
-       repeat expansion till frag_size >= size
-    """
-    mol = Chem.MolFromSmiles(smi)
-    Chem.SanitizeMol(mol)
-    mol.UpdatePropertyCache(strict=False)
-    if addHs:
-        mol = Chem.AddHs(mol)
-    # -- get the list of functional groups FG
-    # e.g., [IFG(atomIds=(1, 4, 7), atoms='NC=O', type='cNC(C)=O'), IFG(atomIds=(10,), atoms='O', type='cO')]
-    IFG_ls = IFG(mol)
-    # if IFG_ls is empty, directly return this compounds
-    if len(IFG_ls) == 0:
-        if resFormat == "smiles":
-            return smi
-        elif resFormat == "smarts":
-            return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
-    # -- get atomIDs (FGs_atomIDs_expan) and terminalAtomIDs (FGs_terminal_atomIDs) for all frags
-    FGs_atomIDs = [_.atomIds for _ in IFG_ls]  # e.g., [(1, 4, 7), ...]
-    n_FGs = len(FGs_atomIDs)
-    # expan all FGs that < size # e.g., [[1, 4, 7, 8, 9], ...]
-    FGs_atomIDs_expan = [None] * n_FGs
-    # terminal atoms: atoms on which bonds to cut will be searched
-    # [[2, 3, 8], ...] or [[], [], ...], note [2, 3, 8] are terminal of comp not frag
-    FGs_terminal_atomIDs = [None] * n_FGs
-    for i in range(n_FGs):
-        # initialization before search and expand fragments
-        FG_atomIDs = list(FGs_atomIDs[i])  # e.g., [1, 4, 7]
-        FG_size = len(FG_atomIDs)
-        # find initial terminal atoms
-        # terminal atoms: atoms with neis that not belong to FG_atomIDs
-        # note terminal atoms here are terminal of fragments not comp
-        # C=O has no fragment terminal, but both C and O are comp terminals
-        # there are 3 cases that no fragment terminal ie, FG_terminal_atomIDs = [] one case FG_terminal_atomIDs not empty
-        # case 1: FG_size < size, and FG_terminal_atomIDs = [], ie., comp too small, no chane to expand e.g., C=O, HCl, HNO3
-        # case 2: FG_size < size, and FG_terminal_atomIDs = [2,3,8],
-        #         got chane to expand, but after expand still cannot reach size, e.g., OCC=O
-        #         eventually FG_terminal_atomIDs = []
-        # case 3: FG_size >= size, and FG_terminal_atomIDs = [], cos the whole big comp is a functional group
-        # for all above cases the original comp will be return
-        # two case FG_terminal_atomIDs is not empty, cutting will performed based on FG_terminal_atomIDs
-        # case 4: FG_size >= size, and FG_terminal_atomIDs = [2,3,8], just cut using FG_terminal_atomIDs
-        # case 5: FG_size < size, and FG_terminal_atomIDs = [2,3,8], after expand, size reached and FG_terminal_atomIDs changed
-        FG_terminal_atomIDs = []  # e.g., [2, 3, 8] or [], HNO3 or C=O -> []
-        for atomID in FG_atomIDs:
-            neis_IDs = [_.GetIdx() for _ in mol.GetAtomWithIdx(atomID).GetNeighbors()]
-            if len(set(neis_IDs) - set(FG_atomIDs)) != 0:
-                FG_terminal_atomIDs = FG_terminal_atomIDs + [atomID]
-        # perform search / expand fragments
-        # [],  case 1 cannot expand, although FG_size < size
-        if (FG_size >= size) | (len(FG_terminal_atomIDs) == 0):
-            # make sure all elements in FGs_atomIDs_expan are lists
-            FGs_atomIDs_expan[i] = FG_atomIDs
-            FGs_terminal_atomIDs[i] = FG_terminal_atomIDs
-            # case 3 still could be [] even if FG_size >= size, though less likely
-        else:
-            # init FG to be expand
-            FG_expan_atomIDs = copy.deepcopy(FG_atomIDs)  # e.g., [1, 4, 7]
-            # max repeat size times, since repeat size should reach the size
-            for rep in range(size):
-                FG_expan_atomIDs_old = copy.deepcopy(FG_expan_atomIDs)
-                # not all atoms need be searched for neis, only ones not in FG_expan_atomIDs for each epoch
-                for atomID in FG_terminal_atomIDs:
-                    neis_IDs = [
-                        _.GetIdx() for _ in mol.GetAtomWithIdx(atomID).GetNeighbors()
-                    ]
-                    FG_expan_atomIDs = FG_expan_atomIDs + neis_IDs
-                FG_expan_atomIDs = list(set(FG_expan_atomIDs))
-                FG_terminal_atomIDs = list(
-                    set(FG_expan_atomIDs) - set(FG_expan_atomIDs_old)
-                )
-                if (
-                    len(FG_terminal_atomIDs) == 0
-                ):  # cannot expand due to small comp size
-                    FGs_atomIDs_expan[i] = FG_expan_atomIDs
-                    FGs_terminal_atomIDs[i] = FG_terminal_atomIDs  # [] case 2
-                    break  # for expan of next FG
-                if len(FG_expan_atomIDs) >= size:  # reach the desired size
-                    FGs_atomIDs_expan[i] = FG_expan_atomIDs
-                    FGs_terminal_atomIDs[i] = FG_terminal_atomIDs
-                    break
-    # it seems not possible that [[2, 3, 8], [], ...], if there one [] then all should be [],
-    # either [[]] or [[], [], ...] (i.e., small comp with single or multiple FGs)
-    # sum([len(_) for _ in FGs_terminal_atomIDs]) == 0:
-    if len(FGs_terminal_atomIDs[0]) == 0:
-        if resFormat == "smiles":
-            return smi
-        elif resFormat == "smarts":
-            return Chem.MolToSmarts(Chem.MolFromSmiles(smi))
-    else:
-        FGs_strs = []  # smiles or smarts
-        for FG_atomIDs in FGs_atomIDs_expan:
-            if resFormat == "smiles":
-                FGs_str = Chem.MolFragmentToSmiles(mol, FG_atomIDs, canonical=True)
-                FGs_strs = FGs_strs + [FGs_str]
-            elif resFormat == "smarts":
-                FGs_str = Chem.MolFragmentToSmarts(
-                    mol, FG_atomIDs, isomericSmarts=False
-                )
-                FGs_strs = FGs_strs + [FGs_str]
-        return FGs_strs
-
-
 #%% Adding fragment smarts column accounting for mixtures
-def getfrags(series, expand=1):  # natoms changed to expand
+def getfrags(
+    series: pd.Series, expand: int = 1, resFormat: str = "smiles"
+) -> Union[List[str], str]:  # natoms changed to expand
+    """
+    Returns carrier fragments of a species given a dataframe row or pandas series and a number of atoms to expand from identified functional groups.
+    Accordingly processes mixtures (eg. salts)
+
+    Args:
+        series (pd.Series): pandas series of a row of the dataframe
+        expand (int, optional): Number of neighboring atoms to expand functional group to. Defaults to 1.
+        resFormat (str, optional): Format of the returned results. Defaults to "smiles".
+
+    Returns:
+        Union[List[str], str]: If no errors in smiles, returns a tuple of the list of fragment smiles/smarts present in species. Otherwise,
+        returns "Error"
+    """
     smiles = series["Smiles"]
     if smiles == "Error":
-        return "Error", "Error"
+        return "Error"
     if (
         series[">1 Compound"] == True
     ):  # This compound is a mixture. Need to split and apply getcarrierfrags to each smiles
-        fragsmarts = getmixturefrags(smiles, expand=expand)
-        fragsmiles = getmixturefrags(smiles, expand=expand, resFormat="smiles")
+        fraginfo = getmixturefrags(smiles, expand=expand, resFormat=resFormat)
     else:
         try:
-            fragsmarts = getCarrierFrags0(smiles, expand=expand)
-            fragsmiles = getCarrierFrags0(smiles, expand=expand, resFormat="smiles")
+            fraginfo = getCarrierFrags0(smiles, expand=expand, resFormat=resFormat)
         except Exception:
-            return "Error", "Error"
-    if type(fragsmarts) != list:
-        fragsmarts = [fragsmarts]
-        fragsmiles = [fragsmiles]
+            return "Error"
+    if type(fraginfo) != list:
+        fraginfo = [fraginfo]
+    return fraginfo
 
-    #     fragsmiles=[Chem.MolToSmiles(Chem.MolFromSmarts(fragsmart)) for fragsmart in fragsmarts] #Does not capture aromaticity
-    return fragsmiles, fragsmarts
+
+def createfragdb(
+    substancedb: Union[str, pd.DataFrame],
+    expand: int = 1,
+    ncpus: int = 16,
+    restart: bool = True,
+    resFormat: str = "smiles",
+    explode: bool = True,
+    fragdb: pd.DataFrame = None,
+) -> pd.DataFrame:
+    """
+    Generates fragment dataframe from a substance dataframe by applying the getfrags function to each row.
+
+    Args:
+        substancedb (Union[str, pd.DataFrame]): Either a path to a pickle file of a pandas dataframe of the substance database, or a pandas dataframe of the substance database.
+        expand (int, optional): Number of neighboring atoms to expand functional group to. Defaults to 1.
+        ncpus (int, optional): Number of CPUs to use. Defaults to 16.
+        restart (bool, optional): Controls if ray cluster already exists, will restart. Defaults to True.
+        resFormat (str, optional): Format of the returned results. Defaults to "smiles".
+        explode (bool, optional): Controls if the returned dataframe is exploded (on FragmentSmiles or FragmentSmarts). Defaults to True.
+        fragdb (pd.DataFrame, optional): If provided, will not run the fragment function but instead will process/cleanup the dataframe. Defaults to None.
+
+    Returns:
+        pd.DataFrame: Fragment dataframe with the new column FragmentSmiles or FragmentSmarts
+    """
+    if resFormat == "smiles":
+        columns = "FragmentSmiles"
+    elif resFormat == "smarts":
+        columns = "FragmentSmarts"
+    if fragdb is None:
+        if isinstance(substancedb, str):
+            substancedb = pd.read_pickle(substancedb)
+        if ncpus > 1:
+            initray(restart=restart, num_cpus=ncpus)
+            substancedbdis = mpd.DataFrame(substancedb)
+        else:
+            substancedbdis = substancedb
+        fragdat = substancedbdis.apply(
+            getfrags, axis=1, expand=expand, resFormat=resFormat, result_type="reduce"
+        )
+        fragdat = pd.Series(data=fragdat.values, index=fragdat.index)
+        fragdb = pd.DataFrame(data=fragdat, index=fragdat.index, columns=[columns])
+    if fragdb.index.name != "SubstanceID" or fragdb.index.names:
+        if fragdb.index.name or fragdb.index.names:
+            fragdb.reset_index(inplace=True)
+        fragdb.set_index("SubstanceID", inplace=True)
+    if substancedb.index.name != "SubstanceID" or substancedb.index.names:
+        if substancedb.index.name or substancedb.index.names:
+            substancedb.reset_index(inplace=True)
+        substancedb.set_index("SubstanceID", inplace=True)
+    fragdb["Smiles"] = substancedb.loc[substancedb.index.isin(fragdb.index)]["Smiles"]
+    fragdb[">1 Compound"] = substancedb[substancedb.index.isin(fragdb.index)][
+        ">1 Compound"
+    ]
+    # fragdb=fragdb.loc[fragdb[columns]!='Error']
+    if explode:
+        fragdb = fragdb.explode(columns)
+    if "count" not in fragdb.columns:
+        fragdb["count"] = fragdb.groupby([fragdb.index, columns])[columns].transform(
+            "count"
+        )
+    fragdb.reset_index(inplace=True)
+    fragdb.drop_duplicates(inplace=True)
+    fragdb.set_index([columns, "SubstanceID"], inplace=True)
+    return fragdb
+
+
+def createfragfreq(fragdb: Union[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Returns a fragment frequency dataframe
+
+    Args:
+        fragdb (Union[str,pd.DataFrame]): Either a path to a pickle file of a pandas dataframe of the fragment database, or a pandas dataframe of the fragment database.
+
+    Returns:
+        pd.DataFrame: Fragment frequency dataframe
+    """
+    if isinstance(fragdb, str):
+        fragdb = pd.read_pickle(fragdb)
+    if fragdb.index.names or fragdb.index.name:
+        fragdb.reset_index(inplace=True)
+    freq = (
+        fragdb[["SubstanceID", "FragmentSmiles"]]
+        .groupby(["FragmentSmiles"])["SubstanceID"]
+        .transform("count")
+    )
+    freqtable = fragdb[["FragmentSmiles"]]
+    freqtable["Frequency"] = freq
+    freqtable.drop_duplicates(inplace=True)
+    freqtable["Popularity"] = (
+        freqtable["Frequency"]
+        .div(freqtable["Frequency"].sum(axis=0), axis=0)
+        .multiply(100)
+        .round()
+    )
+    return freqtable
 
 
 def getfragpartition(partition, natoms):
@@ -325,7 +246,16 @@ def getfragpartition(partition, natoms):
 
 
 #%% Adding fragment smiles column
-def getfragsmiles(fragsmarts):
+def getfragsmiles(fragsmarts: Union[str, List[str]]) -> Union[str, List[str]]:
+    """
+    Converts fragment smarts to smiles
+
+    Args:
+        fragsmarts (Union[str,List[str]]): Fragment smarts either string or list of strings
+
+    Returns:
+        Union[str,List[str]]: Returns fragment smiles either as a string , list of strings or "Error" if input is "Error"
+    """
     if type(fragsmarts) == list:
         fragsmiles = [
             Chem.MolToSmiles(Chem.MolFromSmarts(fragsmart)) for fragsmart in fragsmarts
@@ -337,7 +267,16 @@ def getfragsmiles(fragsmarts):
     return fragsmiles
 
 
-def getsmiles(series):
+def getsmiles(series: pd.Series) -> Union[str, List[str]]:
+    """
+    Row version of getfragsmiles
+
+    Args:
+        series (pd.Series): Row containing fragment smarts
+
+    Returns:
+        Union[str, List[str]]: Returns fragment smiles either as a string , list of strings or "Error" if input is "Error"
+    """
     fragsmarts = series["FragmentSmarts"]
     return getfragsmiles(fragsmarts)
 
@@ -349,7 +288,16 @@ def getsmilespartition(partition):
 #%% Creating mixture column (True if mixture, False if not mixture, Error if smiles not present)
 
 
-def mixtures(smiles):
+def mixtures(smiles: str) -> Union[bool, str]:
+    """
+    Returns if a species is a mixture.
+
+    Args:
+        smiles (str): SMILES string of the species.
+
+    Returns:
+        Union[bool,str]: True if the species is a mixture, False if not, and Error if the species has no SMILES.
+    """
     if smiles == "Error":
         return "Error"
     elif len(smiles.split(".")) > 1:
@@ -358,7 +306,16 @@ def mixtures(smiles):
         return False
 
 
-def findMixtures(series):
+def findMixtures(series: pd.Series) -> Union[bool, str]:
+    """
+    Takes in a pandas series/row corresponding to a species, and returns if the species is a mixture.
+
+    Args:
+        series (pd.Series): Pandas series or row corresponding to a species.
+
+    Returns:
+        Union[bool,str]: True if the species is a mixture, False if not, and Error if the species has no SMILES.
+    """
     smiles = series["Smiles"]
     return mixtures(smiles)
 
@@ -370,7 +327,22 @@ def findMixturespartition(partition):
 #%% Changing fragment entries in mixture rows
 
 
-def getmixturefrags(mixsmiles, expand=1, resFormat="smarts", addHs=True):
+def getmixturefrags(
+    mixsmiles: str, expand: int = 1, resFormat: str = "smarts", addHs: bool = True
+) -> Union[str, List[str]]:
+    """
+    Returns the carrier fragments of a mixture (SMILES has '.' in it) by splitting it into constituent species
+
+    Args:
+        mixsmiles (str): Mixture SMILES string
+        expand (int, optional): Number of neighboring atoms to expand functional group to. Defaults to 1.
+        resFormat (str, optional): Result type, either 'smarts' or 'smiles. Defaults to 'smarts'.
+        addHs (bool, optional): If true, hydrogens will be considered in generation of fragment, recommended as true
+        otherwise terminal atoms of a molecule are not differentiated with other atoms. Defaults to True.
+
+    Returns:
+        Union[str,List[str]]: List of strings of SMARTS or SMILES representing carrier fragments of the mixture. If workflow fails, returns 'Error'.
+    """
     try:
         res = []
         for smiles in mixsmiles.split("."):
@@ -387,7 +359,17 @@ def getmixturefrags(mixsmiles, expand=1, resFormat="smarts", addHs=True):
         return res
 
 
-def getMixturefrags(series, expand=1):
+def getMixturefrags(series: pd.Series, expand: bool = 1) -> Union[str, List[str]]:
+    """
+    Row version of getmixturefrags
+
+    Args:
+        series (pd.Series): Row containing mixture SMILES
+        expand (bool, optional): Number of neighboring atoms to expand functional group to. Defaults to 1.
+
+    Returns:
+        Union[str,List[str]]: List of strings of SMARTS or SMILES representing carrier fragments of the mixture. If workflow fails, returns 'Error'.
+    """
     mixsmiles = series[
         "Smiles"
     ]  # add .values[0] if column is a multiindex, otherwise droplevel = 1 to remove list
@@ -398,15 +380,24 @@ def getMixturefragspartition(partition, expand=1):
     return partition.apply(getMixturefrags, expand=expand, axis=1)
 
 
-# def collapsepartition(partition): #Doesn't work yet. Once exploded it is extremely time-consuming to collapse the dataframe
-#     temp=partition.groupby(['Smiles']).agg([list])
-#     return temp
-
-
 #%% Joining columns to a dataframe
 
 
-def joindf(seriesdf, DB, explodeDB=None):
+def joindf(
+    seriesdf: pd.DataFrame, DB: pd.DataFrame, explodeDB: Union[str, Tuple] = None
+) -> pd.DataFrame:
+    """
+    Joins seriesdf (dataframe to add) to DB (dataframe to be added to). Optionally, can explode DB into separate rows for each entry in DB based on
+    columns specified in explodeDB.
+
+    Args:
+        seriesdf (pd.DataFrame): Dataframe to add.
+        DB (pd.DataFrame): Dataframe to be added to.
+        explodeDB (Union[str,Tuple], optional): Either a string column or tuple of multiple columns. Defaults to None.
+
+    Returns:
+        pd.DataFrame: Dataframe with seriesdf added to DB.
+    """
     if seriesdf.index.name != DB.index.name or seriesdf.index.names != DB.index.names:
         if DB.index.name or DB.index.names:
             DB.reset_index(inplace=True)
@@ -418,6 +409,7 @@ def joindf(seriesdf, DB, explodeDB=None):
     return DB
 
 
+#%% Deprecated..see DB_Reaxys.ipynb
 def buildfragdb(
     sdb=None,
     sdbd=None,
@@ -584,21 +576,6 @@ def buildfragdb(
             print("fragseries writted to file: " + writefragseries)
         mixturesmarts = pd.DataFrame(fragseries)
         fdb = joindf(mixturesmarts, fdb)
-
-    # Deprecated..Dask dataframes take up too much memory when read from file
-
-    #     if dfdb:
-    #         if fdb.index.name:
-    #             fdb.reset_index(inplace=True)
-    #         fdb.set_index('SubstanceID',inplace=True)
-    #         dfdb=dd.from_pandas(fdb,npartitions=64)
-    # #         dfdb=dfdb.reset_index()
-    # #         dfdb=dfdb.set_index(dfdb.columns[dfdb.columns.str.contains('ragment')][0])
-    #         print('Dask fragment database created')
-    #     if writedfdb:
-    #         dfdb.to_parquet(writedfdb)
-    #         print('Dask fragment database written to file: ' + writedfdb)
-
     #%% Indexing dataframe
 
     if index:

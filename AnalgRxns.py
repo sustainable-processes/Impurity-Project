@@ -1,11 +1,13 @@
 # %load ./AnalgRxns.py
 
+from collections import Counter
 import copy
-from MainFunctions import getcompdict, CustomError
+from typing import Dict, List, Set, Tuple, Union
+from MainFunctions import initray, molfromsmiles, getcompdict, CustomError
 import sqlite3
 import pandas as pd
 import modin.pandas as mpd
-from MainFunctions import initray
+from rdkit import Chem
 
 try:
     from ReaxysAPIv2 import main__
@@ -14,15 +16,15 @@ except ImportError:
 
 
 def getanaloguerxns(
-    rxnsource,
-    combinedpool,
-    combinedpoolex=None,
-    workflow="strict",
-    returnall=True,
-    reaxys_update=True,
-    refanaloguerxns=None,
-    ncpus=16,
-    restart=True,
+    rxnsource: Union[str, pd.DataFrame],
+    combinedpool: Set,
+    combinedpoolex: Union[List, Set, None] = None,
+    workflow: str = "strict",
+    returnall: bool = True,
+    reaxys_update: bool = True,
+    refanaloguerxns: Union[List, str, pd.DataFrame] = None,
+    ncpus: int = 16,
+    restart: bool = True,
 ):  # Done
     """
     Retrieves analogue reactions containing analogue reactants and, optionally, reagents given a reaction database (rxnsource),
@@ -48,9 +50,9 @@ def getanaloguerxns(
     if ncpus > 1:
         if restart:
             initray(num_cpus=ncpus)
-    if type(rxnsource) == str:
+    if isinstance(rxnsource, str):
         rxndat = pd.read_pickle(rxnsource)
-    elif type(rxnsource) == pd.core.frame.DataFrame:
+    elif isinstance(rxnsource, pd.DataFrame):
         rxndat = rxnsource
     if ncpus > 1:
         if not rxndat.index.name and not rxndat.index.names:
@@ -81,8 +83,8 @@ def getanaloguerxns(
             checkanaloguerxns,
             combinedpool=combinedpool,
             combinedpoolex=combinedpoolex,
-            relevance_s=workflow_,
-            relevance_m=workflow_,
+            relevance_s=relevance_s,
+            relevance_m=relevance_m,
             axis=1,
             result_type="reduce",
         )
@@ -109,8 +111,8 @@ def getanaloguerxns(
                 checkanaloguerxns,
                 combinedpool=combinedpool,
                 combinedpoolex=combinedpoolex,
-                relevance_s=workflow_,
-                relevance_m=workflow_,
+                relevance_s=relevance_s,
+                relevance_m=relevance_m,
                 axis=1,
                 result_type="reduce",
             )
@@ -135,7 +137,7 @@ def getanaloguerxns(
 def filteranaloguerxns(
     analoguerxns,
     unresolvedids,
-    reaxys_update=False,
+    reaxys_updated=False,
     exemptionlist=[],
     filltemp=True,
     ambienttemp=20,
@@ -147,7 +149,7 @@ def filteranaloguerxns(
     entries without any condition information.
 
     unresolvedids are needed to remove invalid species
-    If reaxys_update is True, then missing reactants/products/reagents (text) can be retrieved and reactions can be removed in these
+    If reaxys_updated is True, then missing reactants/products/reagents (text) can be retrieved and reactions can be removed in these
     cases
 
     exemptionlist refers to a list of compounds that are exempted from filtering/cleaning (eg. catalysts)
@@ -163,7 +165,7 @@ def filteranaloguerxns(
     analoguerxns = analoguerxns.loc[
         (analoguerxns.ReactantID.astype(bool)) & (analoguerxns.ProductID.astype(bool))
     ]
-    if reaxys_update:
+    if reaxys_updated:
         analoguerxns = analoguerxns.loc[
             (~analoguerxns.MissingReactant.astype(bool))
             & (~analoguerxns.MissingProduct.astype(bool))
@@ -212,7 +214,7 @@ def addspeciesdata(
     ncpus=16,
     restart=True,
     SQL=False,
-    reaxys_update=True,
+    reaxys_updated=True,
     hc_Dict=None,
     hc_rct=None,
     refanaloguerxns=None,
@@ -221,10 +223,10 @@ def addspeciesdata(
     Adds species data to each reaction (dictionary containing SMILES, formula, count, and atom types/count) given a substance
     source (substancesource) --MEMORY INTENSIVE
 
-    Specify includesolve as True if solvent data is required
+    Specify includesolv as True if solvent data is required
     ncpus indicates how many CPUs or cores for parallel execution
     Pass in an SQL connection under substancesource and put SQL as true if memory is low (NOT IMPLEMENTED YET)
-    reaxys_update determines if cross-validation with Reaxys (using API) has been done before already
+    reaxys_updated determines if cross-validation with Reaxys (using API) has been done before already
     hc_Dict is optional and contains a dictionary of product help compounds (small compounds) that will help in balancing later
     hc_rct is optional and contains a dictionary of reactant help compounds (small compounds) that will help in balancing later
 
@@ -237,7 +239,7 @@ def addspeciesdata(
     else:
         idxreset = False
     idxcol = []
-    if reaxys_update:
+    if reaxys_updated:
         idxcol = ["ReactionID", "Instance"]
     else:
         idxcol = ["ReactionID"]
@@ -259,7 +261,7 @@ def addspeciesdata(
             DB = substancedbsource
         elif isinstance(substancedbsource, sqlite3.Connection):
             DB = substancedbsource
-        if reaxys_update:
+        if reaxys_updated:
             if includesolv:
                 cols = [
                     "ReactantID",
@@ -599,16 +601,30 @@ def checkunresolved(row, unresolvedids, exemptionlist=[]):
 
 
 def getspecdat(
-    row, DB, Rdata=True, Pdata=False, Rgtdata=False, Solvdata=False, SQL=False
-):
+    row: pd.Series,
+    DB: Union[pd.DataFrame, sqlite3.Connection],
+    Rdata: bool = True,
+    Pdata: bool = False,
+    Rgtdata: bool = False,
+    Solvdata: bool = False,
+    SQL: bool = False,
+) -> Dict:
     """
-    Retrieves reaxys species data in the form of a dictionary for a row given a reference database or SQL connection
+     Retrieves reaxys species data in the form of a dictionary for a row given a reference database or SQL connection
     (DB). Specify only one of Rdata (reactants), Pdata (products), Rgtdata (reagents) and Solvdata (solvents) as True.
 
-    Pass in an SQL connection under DB and put SQL as true if memory is low
+    Args:
+        row (pd.Series): Row of dataframe to be processed
+        DB (Union[pd.DataFrame, sqlite3.Connection]): Reference database or SQL connection (substance dataframe). Index needs to be substance ID.
+        Rdata (bool, optional): Specify True if reactant data needs to be retrieved. Defaults to True.
+        Pdata (bool, optional): Specify True if product data needs to be retrieved. Defaults to False.
+        Rgtdata (bool, optional): Specify True if reagent data needs to be retrieved. Defaults to False.
+        Solvdata (bool, optional): Specify True if solvent data needs to be retrieved. Defaults to False.
+        SQL (bool, optional): Specify True if DB is a SQL connection. Defaults to False.
 
+    Returns:
+        Dict: Dictionary of species data
     """
-
     if Rdata:
         col = "ReactantID"
     elif Pdata:
@@ -637,26 +653,52 @@ def getspecdat(
     return dat
 
 
-def getspecdat_rxn(rxnsmiles):
+def getspecdat_rxn(
+    rxnsmiles: str, reagents: List = [], solvents: List = []
+) -> Tuple[Dict, Dict, Dict, Dict]:
     """
-    A more general function of getspecdat that retrieves species data from a given reaction SMILES
+    A more general function of getspecdat that retrieves species data from a given reaction SMILES.
+    Optionally, reagents and/or solvents can be given in a list [SMILES,SMILES etc.]
 
+    Args:
+        rxnsmiles (str): Reaction SMILES
+        reagents (List, optional): List of reagent SMILES. Defaults to [].
+        solvents (List, optional): List of solvent SMILES. Defaults to [].
+
+    Raises:
+        Exception: If invalid reaction SMILES is given
+
+    Returns:
+        Tuple[Dict, Dict,Dict,Dict]: Tuple of dictionaries of reactant, product, reagent and solvent data
     """
-    if not type(rxnsmiles) == str:
-        raise CustomError(
-            "Please input a reaction smiles string. Include '>>' even if no products are inputted"
+    try:
+        splitrxn = rxnsmiles.split(">>")
+        if len(splitrxn) == 1:  # Only reactants specified
+            raise Exception
+        rcts = splitrxn[0].split(".")
+        prods = splitrxn[1].split(".")
+        rcts = [Chem.MolToSmiles(molfromsmiles(rct)) for rct in rcts]
+        prods = [Chem.MolToSmiles(molfromsmiles(prod)) for prod in prods]
+    except Exception:
+        print(
+            "Please supply valid reaction smiles. Reactant.Reactant >> Product.Product"
         )
-    splitrxn = rxnsmiles.split(">>")
-    LHS = {}
-    RHS = {}
-    LHSspec = set()
-    RHSspec = set()
-    if splitrxn[0]:
-        LHSspec = set(splitrxn[0].split("."))
-    if splitrxn[1]:
-        RHSspec = set(splitrxn[1].split("."))
-    for i, spec in enumerate(LHSspec):
-        LHS.update(getcompdict(ID=i, smiles=spec))
-    for j, spec in enumerate(RHSspec):
-        RHS.update(getcompdict(ID=j, smiles=spec))
-    return LHS, RHS
+    rcts = Counter(rcts)
+    prods = Counter(prods)
+    Rdata = {}
+    Pdata = {}
+    Rgtdata = {}
+    Solvdata = {}
+    for i, rct in enumerate(rcts):
+        Rdata.update(getcompdict(ID=i, smiles=rct))
+        Rdata[i]["count"] = rcts[rct]
+    for j, prod in enumerate(prods):
+        Pdata.update(getcompdict(ID=j, smiles=prod))
+        Pdata[j]["count"] = prods[prod]
+    for k, rgt in enumerate(reagents):
+        k = max(list(Rdata.keys())) + k + 1
+        Rgtdata.update(getcompdict(ID=k, smiles=rgt))
+    for f, solv in enumerate(solvents):
+        f = max(list(Rdata.keys()) + list(Rgtdata.keys())) + f + 1
+        Solvdata.update(getcompdict(ID=f, smiles=solv))
+    return Rdata, Pdata, Rgtdata, Solvdata

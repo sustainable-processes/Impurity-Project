@@ -123,7 +123,7 @@ def relevance_score_morgan_(
             m1 = Chem.MolFromSmiles(rgtsmiles)
             fp1 = AllChem.GetMorganFingerprint(m1, morganradius)
             frags = set(
-                getCarrierFrags0(m1, userinput="mol", expand=expand, resFormat="smiles")
+                getCarrierFrags0(m1, expand=expand, resFormat="smiles")
             ).intersection(set(fragdict.keys()))
             if not frags:
                 frags = [
@@ -151,7 +151,7 @@ def relevance_score_morgan_(
         return globalsim
 
 
-def standardize(impfinalfilt, reaxys_update=True, ncpus=16, restart=False):
+def standardize(impfinalfilt, reaxys_updated=True, ncpus=16, restart=False):
     if ncpus > 1:
         if restart:
             initray(num_cpus=ncpus)
@@ -165,7 +165,7 @@ def standardize(impfinalfilt, reaxys_update=True, ncpus=16, restart=False):
         columns=["querycompds", "impurities", "impurityrxn"],
     )
     impfinalfilt[["querycompds", "impurities", "impurityrxn"]] = standardized
-    if reaxys_update:
+    if reaxys_updated:
         impfinalfilt = (
             impfinalfilt.reset_index()
             .drop_duplicates(subset=["Instance", "ReactionID", "impurityrxn"])

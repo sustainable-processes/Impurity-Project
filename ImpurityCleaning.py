@@ -15,7 +15,7 @@ def cleanimpurities(
     analoguerxns_updated,
     inputquery,
     includesolv=True,
-    reaxys_update=True,
+    reaxys_updated=True,
     hc_prod={},
 ):
     impfinal = analoguerxnsimpfinal[
@@ -45,11 +45,19 @@ def cleanimpurities(
     ].copy()
     if includesolv:
         impfinal = updatecolumns(
-            analoguerxns_updated, impfinal, cols=["Rgtdata", "Solvdata"]
+            analoguerxns_updated,
+            impfinal,
+            cols=["Rgtdata", "Solvdata"],
+            idxcol=["ReactionID", "Instance"],
         )
     else:
-        impfinal = updatecolumns(analoguerxns_updated, impfinal, cols=["Rgtdata"])
-    if reaxys_update:
+        impfinal = updatecolumns(
+            analoguerxns_updated,
+            impfinal,
+            cols=["Rgtdata"],
+            idxcol=["ReactionID", "Instance"],
+        )
+    if reaxys_updated:
         if includesolv:
             impfinal = updatecolumns(
                 analoguerxnsfilt,
@@ -106,6 +114,7 @@ def cleanimpurities(
                     "Yield",
                     "YearPublished",
                 ],
+                idxcol=["ReactionID", "Instance"],
             )
         else:
             impfinal = updatecolumns(
@@ -159,6 +168,7 @@ def cleanimpurities(
                     "Yield",
                     "YearPublished",
                 ],
+                idxcol=["ReactionID", "Instance"],
             )
 
     else:
@@ -206,6 +216,7 @@ def cleanimpurities(
                     "ReactionTime",
                     "ReactionType",
                 ],
+                idxcol=["ReactionID", "Instance"],
             )
         else:
             impfinal = updatecolumns(
@@ -249,6 +260,7 @@ def cleanimpurities(
                     "ReactionTime",
                     "ReactionType",
                 ],
+                idxcol=["ReactionID", "Instance"],
             )
 
     impfinal = impfinal.explode("querycompds")
@@ -267,7 +279,7 @@ def cleanimpurities(
         "impurityrxn"
     )  # Explode again to get each impurity reaction
     impfinal = checkimpurities(
-        impfinal, inputquery, hc_prod, reaxys_update=reaxys_update
+        impfinal, inputquery, hc_prod, reaxys_updated=reaxys_updated
     )
     return impfinal
 
@@ -285,7 +297,7 @@ def addconditions(row, db):
 
 
 def checkimpurities(
-    impfinal, inputquery, hc_prod={}, reaxys_update=True, ncpus=16, restart=False
+    impfinal, inputquery, hc_prod={}, reaxys_updated=True, ncpus=16, restart=False
 ):
     querycompds = list(inputquery["species"].keys())
     if ncpus > 1:
@@ -298,7 +310,7 @@ def checkimpurities(
         valid_impurities,
         hc_prod=hc_prod,
         querycompds=querycompds,
-        reaxys_update=reaxys_update,
+        reaxys_updated=reaxys_updated,
         axis=1,
         result_type="reduce",
     )
@@ -308,7 +320,7 @@ def checkimpurities(
 
 
 # Removing unrealistic impurities (atoms and query compounds)
-def valid_impurities(row, hc_prod, querycompds, reaxys_update=True):
+def valid_impurities(row, hc_prod, querycompds, reaxys_updated=True):
     impset = copy.deepcopy(set(row.impurities))
     if row.hcprod:
         impset = impset - set([hc_prod[hcid]["smiles"] for hcid in row.hcprod])
@@ -318,7 +330,7 @@ def valid_impurities(row, hc_prod, querycompds, reaxys_update=True):
         [Descriptors.NumRadicalElectrons(Chem.MolFromSmiles(imp)) > 0 for imp in impset]
     ):
         return "Impurities are atoms/radicals"
-    if reaxys_update:
+    if reaxys_updated:
         if (
             (row.ReagentID == "NaN" or row.ReagentID is None or not row.ReagentID)
             and (
@@ -350,7 +362,7 @@ def valid_impurities(row, hc_prod, querycompds, reaxys_update=True):
             and (row.ReactionTime is None or not row.ReactionTime)
         ):
             return "No reaction conditions detected. Check reaction record to verify plausibility"
-    if reaxys_update:
+    if reaxys_updated:
         if (len(set(row.querycompds)) == 1 or len(set(row.LHS)) == 1) and (
             (row.ReagentID == "NaN" or row.ReagentID is None or not row.ReagentID)
             and (
