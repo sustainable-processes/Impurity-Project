@@ -1,8 +1,8 @@
 from cProfile import label
 from collections import Counter
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple, Union
 import ipywidgets as widgets
-from ipywidgets import interact, Label
+from ipywidgets import interact, Label, Layout
 import pandas as pd
 from tables import Description
 from AnalgCompds import getCarrierFrags0
@@ -213,17 +213,22 @@ def vismaster(**kwargs):
     dataminingbutton = widgets.Button(
         description="Data Mining",
         button_style="success",
-        layout=widgets.Layout(width="25%", height="auto"),
+        layout=widgets.Layout(width="20%", height="auto"),
     )
     dataprocessingbutton = widgets.Button(
         description="Data Processing",
         button_style="success",
-        layout=widgets.Layout(width="25%", height="auto"),
+        layout=widgets.Layout(width="20%", height="auto"),
     )
     impuritypredictionbutton = widgets.Button(
         description="Impurity Prediction",
         button_style="success",
-        layout=widgets.Layout(width="25%", height="auto"),
+        layout=widgets.Layout(width="20%", height="auto"),
+    )
+    impurityrankingbutton = widgets.Button(
+        description="Impurity Ranking",
+        button_style="success",
+        layout=widgets.Layout(width="20%", height="auto"),
     )
     allbutton = widgets.Button(
         description="All",
@@ -231,7 +236,13 @@ def vismaster(**kwargs):
         layout=widgets.Layout(width="25%", height="auto"),
     )
     uibutton = widgets.HBox(
-        [allbutton, dataminingbutton, dataprocessingbutton, impuritypredictionbutton],
+        [
+            allbutton,
+            dataminingbutton,
+            dataprocessingbutton,
+            impuritypredictionbutton,
+            impurityrankingbutton,
+        ],
         layout=widgets.Layout(border="5px solid green"),
     )
     display(Markdown("#### <center>Select a stage to visualize</center>"))
@@ -249,10 +260,21 @@ def vismaster(**kwargs):
     dataprocessingbutton.on_click(
         functools.partial(on_button_clicked, stages=["Data Processing"])
     )
+    impuritypredictionbutton.on_click(
+        functools.partial(on_button_clicked, stages=["Impurity Prediction"])
+    )
+    impurityrankingbutton.on_click(
+        functools.partial(on_button_clicked, stages=["Impurity Ranking"])
+    )
     allbutton.on_click(
         functools.partial(
             on_button_clicked,
-            stages=["Data Mining", "Data Processing", "Impurity Prediction"],
+            stages=[
+                "Data Mining",
+                "Data Processing",
+                "Impurity Prediction",
+                "Impurity Ranking",
+            ],
         )
     )
     display(outmaster)
@@ -261,6 +283,9 @@ def vismaster(**kwargs):
 def tracemaster(
     stages=["Data Mining", "Data Processing", "Impurity Prediction"], **kwargs
 ):
+    global displaywidget, optionschanged
+    displaywidget = False
+    optionschanged = False
     for stage in stages:
         if stage == "Data Mining":
             display(Markdown("<h1><center><strong>Data Mining</strong></center></h1>"))
@@ -289,7 +314,7 @@ def tracemaster(
                             )
                         )
                     )
-                    display(Markdown(f"Query Reaction SMILES: {userinput}"))
+                    display(Markdown(f"`Query Reaction SMILES: {userinput}`"))
                     queryspecies = list(inputquery["species"].keys())
                     queryspec = widgets.Dropdown(
                         options=[""] + queryspecies,
@@ -739,7 +764,7 @@ def tracemaster(
                                     if "rxnsmiles0" in reactiondf:
                                         display(
                                             Markdown(
-                                                "<h3><center><strong>5. Analogue Reaction (Reaxys)</strong></center></h3>"
+                                                "<h2><center><strong>5. Analogue Reaction (Reaxys)</strong></center></h2>"
                                             )
                                         )
                                         rxninfo = {}
@@ -791,12 +816,16 @@ def tracemaster(
                                     if "balrxnsmiles" in reactiondf:
                                         display(
                                             Markdown(
-                                                "<h3><center><strong>6. Balanced Reaction</strong></center></h3>"
+                                                "<h2><center><strong>6. Balanced Reaction</strong></center></h2>"
                                             )
                                         )
                                         if reactiondf.balrxnsmiles != "Error":
                                             visreaction(reactiondf.balrxnsmiles)
-                                        display(Markdown(f"Message: {reactiondf.msg}"))
+                                        display(
+                                            Markdown(
+                                                f"<strong>Message: {reactiondf.msg}</center>"
+                                            )
+                                        )
                                         if kwargs["analoguerxnsmapped"] is not None:
                                             display(
                                                 Markdown(
@@ -806,7 +835,7 @@ def tracemaster(
                                     if "mapped_rxn" in reactiondf:
                                         display(
                                             Markdown(
-                                                "<h3><center><strong>7. Mapped Reaction</strong></center></h3>"
+                                                "<h2><center><strong>7. Mapped Reaction</strong></center></h2>"
                                             )
                                         )
                                         if reactiondf.mapped_rxn != "Error":
@@ -819,10 +848,18 @@ def tracemaster(
                                         else:
                                             display(Markdown("Error"))
                                 if i <= 4:
-                                    display(Markdown(f"Message: {reactiondf.msg1}"))
+                                    display(
+                                        Markdown(
+                                            f"<strong>Message: {reactiondf.msg1}</center>"
+                                        )
+                                    )
                                 if i <= 3:
                                     if reactiondf.msg2 != reactiondf.msg1:
-                                        display(Markdown(f"Message: {reactiondf.msg2}"))
+                                        display(
+                                            Markdown(
+                                                f"<strong>Message: {reactiondf.msg2}</center>"
+                                            )
+                                        )
                                     if kwargs["analoguerxnsassigned"] is not None:
                                         display(
                                             Markdown(
@@ -833,7 +870,7 @@ def tracemaster(
                                     if "rxncentermapnum" in reactiondf:
                                         display(
                                             Markdown(
-                                                "<h3><center><strong>8. Reaction Center</strong></center></h3>"
+                                                "<h2><center><strong>8. Reaction Center</strong></center></h2>"
                                             )
                                         )
                                         if reactiondf.rxncenter:
@@ -857,7 +894,7 @@ def tracemaster(
                                 IPythonConsole.drawOptions.setHighlightColour(
                                     (0.7, 1, 0.7)
                                 )
-                                IPythonConsole.drawOptions.minFontSize = 12
+                                IPythonConsole.drawOptions.minFontSize = 7
                                 IPythonConsole.drawOptions.useBWAtomPalette()
                                 IPythonConsole.drawOptions.legendFraction = 0.5
                                 IPythonConsole.drawOptions.legendFontSize = 50
@@ -916,6 +953,48 @@ def tracemaster(
                                                     ]
                                                 }
                                             )
+                                    RHSdata = reactiondf.RHSdata
+                                    drawsettingsp = {prodid: {} for prodid in RHSdata}
+                                    for prodid in RHSdata:
+                                        for i, mappedsmiles in enumerate(
+                                            RHSdata[prodid]["mappedsmiles"]
+                                        ):
+                                            if isinstance(mappedsmiles, tuple):
+                                                for j, mappedsmiles_ in enumerate(
+                                                    mappedsmiles
+                                                ):
+                                                    pidx = (i, j)
+                                                    prodmol = Chem.AddHs(
+                                                        molfromsmiles(mappedsmiles_)
+                                                    )
+                                                    drawsettingsp[prodid].update(
+                                                        {
+                                                            pidx: [
+                                                                prodmol,
+                                                                [],
+                                                                {},
+                                                                f"Species {prodid}, instance {pidx} \n Mapped SMILES: {mappedsmiles_}",
+                                                                {},
+                                                            ]
+                                                        }
+                                                    )
+                                            else:
+                                                pidx = i
+                                                prodmol = Chem.AddHs(
+                                                    molfromsmiles(mappedsmiles)
+                                                )
+                                                drawsettingsp[prodid].update(
+                                                    {
+                                                        pidx: [
+                                                            prodmol,
+                                                            [],
+                                                            {},
+                                                            f"Species {prodid}, instance {pidx} \n Mapped SMILES: {mappedsmiles}",
+                                                            {},
+                                                        ]
+                                                    }
+                                                )
+
                                     RCs = [
                                         reactiondf.rxncentermapnum,
                                         set(reactiondf.rnbmap.keys()),
@@ -926,6 +1005,10 @@ def tracemaster(
                                             rctid = mapdict[changemapnum][0]
                                             ridx = mapdict[changemapnum][1]
                                             idxr = mapdict[changemapnum][2]
+                                            prodid = mapdict[changemapnum][3]
+                                            pidx = mapdict[changemapnum][4]
+                                            idxp = mapdict[changemapnum][5]
+
                                             if (
                                                 idxr not in drawsettings[rctid][ridx][1]
                                             ):  # Reaction center outside
@@ -960,7 +1043,13 @@ def tracemaster(
                                                 drawsettings[rctid][ridx][2][
                                                     idxr
                                                 ] = colors[1]
-                                    print(drawsettings)
+                                            drawsettingsp[prodid][pidx][1].append(idxp)
+                                            drawsettingsp[prodid][pidx][2].update(
+                                                {idxp: colors[1]}
+                                            )
+
+                                    # print(drawsettings)
+                                    # print(drawsettingsp)
 
                                     display(
                                         Markdown(
@@ -1000,9 +1089,55 @@ def tracemaster(
                                     )
                                     display(
                                         Markdown(
+                                            f"<h4><center><strong>Products</strong></center></h4>"
+                                        )
+                                    )
+                                    IPythonConsole.drawOptions.setHighlightColour(
+                                        (1, 0.7, 0.7)
+                                    )
+                                    display(
+                                        Draw.MolsToGridImage(
+                                            [
+                                                drawsettingsp[prodid][pidx][0]
+                                                for prodid in drawsettingsp
+                                                for pidx in drawsettingsp[prodid]
+                                            ],
+                                            subImgSize=(500, 500),
+                                            legends=[
+                                                drawsettingsp[prodid][pidx][3]
+                                                for prodid in drawsettingsp
+                                                for pidx in drawsettingsp[prodid]
+                                            ],
+                                            highlightAtomLists=[
+                                                drawsettingsp[prodid][pidx][1]
+                                                for prodid in drawsettingsp
+                                                for pidx in drawsettingsp[prodid]
+                                            ],
+                                            highlightAtomColors=[
+                                                drawsettingsp[prodid][pidx][2]
+                                                for prodid in drawsettingsp
+                                                for pidx in drawsettingsp[prodid]
+                                            ],
+                                            highlightBondColors=[
+                                                drawsettingsp[prodid][pidx][4]
+                                                for prodid in drawsettingsp
+                                                for pidx in drawsettingsp[prodid]
+                                            ],
+                                            useSVG=True,
+                                        )
+                                    )
+
+                                    display(
+                                        Markdown(
                                             f"<center><strong>Message:{reactiondf.msg3}</strong></center>"
                                         )
                                     )
+                                    if kwargs["analoguerxnsfinal"] is not None:
+                                        display(
+                                            Markdown(
+                                                f"<center><strong>{len(kwargs['analoguerxnsfinal'])} reactions remaining after filtering</strong></center>"
+                                            )
+                                        )
                                 break
 
             outdp = widgets.interactive_output(
@@ -1020,48 +1155,1241 @@ def tracemaster(
             )
             display(outdp)
 
-            # def visreactioncenter(**kwargs):
+        if stage == "Impurity Prediction":
+            display(
+                Markdown(
+                    "<h1><center><strong>Impurity Prediction</strong></center></h1>"
+                )
+            )
+            if not displaywidget:
+                reactionid_ip = widgets.SelectionSlider(
+                    options=[""], description="Reaction ID", continuous_update=False
+                )
+                instance_ip = widgets.SelectionSlider(
+                    description="Instance", options=[0], continuous_update=False
+                )
+                reactionid_iptext = widgets.Text(description="Reaction ID", value="")
+                customrxnsmiles_ip = widgets.Text(
+                    description="Custom Reaction SMILES",
+                    style={"description_width": "initial"},
+                )
+            else:
+                reactionid_ip = reactionid_dp
+                instance_ip = instance_dp
+                reactionid_iptext = reactionid_dptext
+                customrxnsmiles_ip = customrxnsmiles_dp
 
-            #     smileswidget = widgets.DropDown(
-            #         description="Reaction SMILES", options=[""], value="", continuous_update=False
+            for i, dfname in enumerate(
+                [
+                    "analoguerxnstempl",
+                    "analoguerxnsimp",
+                    "analoguerxnsimpfilt",
+                    "impfinal",
+                    "impfinalfilt",
+                ]
+            ):
+                if dfname in kwargs:
+                    df = kwargs[dfname]
+                    if df is not None:
+                        df = verifyindex(df)
+                        if not optionschanged:
+                            (
+                                reactionid_ip,
+                                reactionid_iptext,
+                                instance_ip,
+                                customrxnsmiles_ip,
+                            ) = updatereactionwidget(
+                                reactionid_ip,
+                                instance_ip,
+                                df,
+                                reactionid_iptext,
+                                customrxnsmiles_ip,
+                            )
+                            optionschanged = True
+                else:
+                    kwargs[dfname] = None
+
+            def traceiprxns(reactionid, instance, customrxnsmiles):
+                global displaywidget, success
+                reactionidui = widgets.VBox([reactionid_ip, reactionid_iptext])
+                display(widgets.HBox([reactionidui, instance_ip, customrxnsmiles_ip]))
+                displaywidget = True
+
+                for i, dfname in enumerate(
+                    [
+                        "impfinalfilt",
+                        "impfinal",
+                        "analoguerxnsimpfilt",
+                        "analoguerxnsimp",
+                        "analoguerxnstempl",
+                    ]
+                ):
+                    success = False
+                    if kwargs[dfname] is not None:
+                        df = kwargs[dfname]
+                        if (reactionid, instance) in df.index:
+                            success = True
+                            reactiondf = df.xs((reactionid, instance))
+                            if i <= 4:
+                                if "template" in reactiondf:
+                                    if isinstance(reactiondf, pd.DataFrame):
+                                        reactiondf_ = reactiondf.iloc[0]
+                                    else:
+                                        reactiondf_ = reactiondf
+                                    display(
+                                        Markdown(
+                                            f"<h2><center><strong>9. Template</strong></center></h2>"
+                                        )
+                                    )
+                                    display(
+                                        drawReaction(
+                                            rdChemReactions.ReactionFromSmarts(
+                                                reactiondf_.template
+                                            )
+                                        )
+                                    )
+                                    display(
+                                        Markdown(
+                                            f"`Template SMILES: {reactiondf_.template}`"
+                                        )
+                                    )
+                                    display(
+                                        Markdown(
+                                            f"<strong>Message:{reactiondf_.msg4}</strong>"
+                                        )
+                                    )
+                            if i <= 3:
+                                if kwargs["analoguerxnsimp"] is not None and i != 3:
+                                    reactiondf_ = kwargs["analoguerxnsimp"].xs(
+                                        (reactionid, instance)
+                                    )
+                                else:
+                                    reactiondf_ = reactiondf
+                                if "impurityrxn" in reactiondf_:
+                                    display(
+                                        Markdown(
+                                            f"<h2><center><strong>10. Template Application</strong></center></h2>"
+                                        )
+                                    )
+                                    displaymsg = False
+                                    if isinstance(reactiondf_, pd.DataFrame):
+                                        for idx, reactiondf__ in reactiondf.iterrows():
+                                            if (
+                                                reactiondf__.impurityrxn
+                                                and reactiondf__.impurityrxn != "Error"
+                                            ):
+                                                display(
+                                                    drawReaction(
+                                                        rdChemReactions.ReactionFromSmarts(
+                                                            reactiondf__.impurityrxn,
+                                                            useSmiles=True,
+                                                        )
+                                                    )
+                                                )
+                                                display(
+                                                    Markdown(
+                                                        f"`Impurity Reaction SMILES: {reactiondf__.impurityrxn}`"
+                                                    )
+                                                )
+                                            if not displaymsg:
+                                                display(
+                                                    Markdown(
+                                                        f"<strong>Message:{reactiondf__.msg5}</strong>"
+                                                    )
+                                                )
+                                                displaymsg = True
+                                    else:
+                                        if (
+                                            reactiondf_.impurityrxn
+                                            and reactiondf_.impurityrxn != "Error"
+                                        ):
+                                            for impurityrxn in reactiondf_.impurityrxn:
+                                                display(
+                                                    drawReaction(
+                                                        rdChemReactions.ReactionFromSmarts(
+                                                            list(impurityrxn)[0],
+                                                            useSmiles=True,
+                                                        )
+                                                    )
+                                                )
+                                                display(
+                                                    Markdown(
+                                                        f"`Impurity Reaction SMILES: {list(impurityrxn)[0]}`"
+                                                    )
+                                                )
+                                        display(
+                                            Markdown(
+                                                f"<strong>Message:{reactiondf_.msg5}</strong>"
+                                            )
+                                        )
+                                if kwargs["impfinal"] is not None:
+                                    display(
+                                        Markdown(
+                                            f"<center><strong>{len(kwargs['impfinal'].index.unique())} reactions remaining after filtering</strong></center>"
+                                        )
+                                    )
+                            if i <= 1:
+                                if "msg6" in reactiondf:
+                                    display(
+                                        Markdown(
+                                            f"<h2><center><strong>11. Impurity Cleaning</strong></center></h2>"
+                                        )
+                                    )
+                                    if isinstance(reactiondf, pd.DataFrame):
+                                        reactiondf = reactiondf.iloc[0]
+                                    if isinstance(reactiondf.msg6, pd.DataFrame):
+                                        msg6 = reactiondf.msg6.iloc[0]
+                                    else:
+                                        msg6 = reactiondf.msg6
+                                    display(
+                                        Markdown(f"<strong>Message:{msg6}</strong>")
+                                    )
+                                if kwargs["impfinalfilt"] is not None:
+                                    display(
+                                        Markdown(
+                                            f"<center><strong>{len(kwargs['impfinalfilt'].index.unique())} reactions remaining after filtering</strong></center>"
+                                        )
+                                    )
+
+                            break
+
+            outip = widgets.interactive_output(
+                traceiprxns,
+                {
+                    "reactionid": reactionid_ip,
+                    "instance": instance_ip,
+                    "customrxnsmiles": customrxnsmiles_ip,
+                    # "analgrawcheck": analgrawcheck,
+                    # "analgcheck": analgcheck,
+                    # "analgbalcheck": analgbalcheck,
+                    # "analgmapcheck": analgmapcheck,
+                    # "analgcentcheck": analgcentcheck,
+                },
+            )
+
+            display(outip)
+
+        if stage == "Impurity Ranking":
+            display(
+                Markdown("<h1><center><strong>Impurity Ranking</strong></center></h1>")
+            )
+            for i, iq in enumerate(
+                ["inputquery_analg_updated", "inputquery_analg", "inputquery"]
+            ):
+                if iq in kwargs and kwargs[iq] is not None:
+                    inputquery = kwargs[iq]
+                    userinput = inputquery["smiles"]
+                    display(
+                        Markdown(
+                            f"<h2><center><strong>Query Reaction (User Input)</strong></center></h2>"
+                        )
+                    )
+                    display(
+                        drawReaction(
+                            rdChemReactions.ReactionFromSmarts(
+                                userinput, useSmiles=True
+                            )
+                        )
+                    )
+                    display(Markdown(f"`Query Reaction SMILES: {userinput}`"))
+                    break
+            for i, dfname in enumerate(
+                [
+                    "impfinal",
+                    "impfinalfilt",
+                    "impfinalfilt2",
+                    "impfinalfilt3",
+                    "impfinalfilt4",
+                    "impfinalfilt5",
+                ]
+            ):
+                if dfname in kwargs:
+                    df = kwargs[dfname]
+                    if df is not None:
+                        df = verifyindex(df)
+                else:
+                    kwargs[dfname] = None
+            impview = widgets.Button(
+                description="Impurity View",
+                button_style="success",
+                layout=widgets.Layout(width="50%", height="auto"),
+            )
+            rxnview = widgets.Button(
+                description="Reaction View",
+                button_style="success",
+                layout=widgets.Layout(width="50%", height="auto"),
+            )
+            iruibutton = widgets.HBox(
+                [impview, rxnview], layout=widgets.Layout(border="5px solid green")
+            )
+            display(Markdown("## <center>Select a view</center>"))
+            display(iruibutton)
+            irmaster = widgets.Output()
+
+            def on_view_clicked(b, view="Impurity"):
+                with irmaster:
+                    clear_output()
+                    irview(view=view, **kwargs)
+
+            def irview(view="Impurity", **kwargs):
+                if kwargs["summary3"] is not None:
+                    display(
+                        Markdown(
+                            "<h2><strong><center>Main Product (Query) Reaction</center></strong></h2>"
+                        )
+                    )
+                    visreaction(kwargs["summary3"].iloc[0].rxn)
+                    display(
+                        Markdown(
+                            f"Max relevance: {kwargs['summary3'].iloc[0]['''Max relevance_tfiltered''']}"
+                        )
+                    )
+                    display(
+                        Markdown(
+                            f"Number of hits: {kwargs['summary3'].iloc[0].Hits_tfiltered}"
+                        )
+                    )
+                    Trange = kwargs["summary3"].iloc[0].t_range
+                    display(
+                        Markdown(
+                            f"Temperature range (&deg;C): {'-'.join([str(temp) for temp in Trange])}"
+                        )
+                    )
+                    display(
+                        Markdown(
+                            "*Temperature range is based on 5th to 95th percentile of top 10 % relevant reactions*"
+                        )
+                    )
+                    errorcodedict = {
+                        "impfinalfilt2": "Invalid condition",
+                        "impfinalfilt3": "Suspect self-reaction (without catalyst or reagent)",
+                        "impfinalfilt4": "Invalid catalyst",
+                        "impfinalfilt5": "Missing reactants/products",
+                        "Frame2": "Missing temperature",
+                        "Frame4": "Temperature outside indicated range",
+                    }
+                    if view == "Impurity":  # Impurity view
+                        mainprods = kwargs["summary3"].iloc[0].products
+                        impcountwidget = widgets.IntSlider(
+                            description="Number of impurity reactions to display",
+                            style={"description_width": "initial"},
+                            layout=Layout(width="500px"),
+                            min=1,
+                            max=5,
+                            step=1,
+                            value=2,
+                        )
+
+                        def displayimpurities(impuritycount):
+                            display(
+                                Markdown(
+                                    f"## <center><strong>Impurity Reactions</strong></center>"
+                                )
+                            )
+                            display(impcountwidget)
+                            i = 1
+                            j = 1
+                            while i <= impuritycount:
+                                imprxn = kwargs["summary3"].iloc[j].rxn
+                                Trangei = kwargs["summary3"].iloc[j].t_range
+                                if min(Trangei) > max(Trange) or max(Trangei) < min(
+                                    Trange
+                                ):
+                                    j += 1
+                                    continue
+                                impprods = kwargs["summary3"].iloc[j].products
+                                if (
+                                    "hc_Dict" in kwargs
+                                    and kwargs["hc_Dict"] is not None
+                                ):
+                                    if i > 0 and any(
+                                        [
+                                            impprod in mainprods
+                                            and impprod
+                                            not in [
+                                                kwargs["hc_Dict"][k]["smiles"]
+                                                for k in kwargs["hc_Dict"]
+                                            ]
+                                            for impprod in impprods
+                                        ]
+                                    ):
+                                        j += 1
+                                        continue
+
+                                display(
+                                    Markdown(
+                                        f"<h2><strong><center>{i}.</center></strong></h2>"
+                                    )
+                                )
+                                visreaction(imprxn)
+                                display(
+                                    Markdown(
+                                        f"Max relevance: {kwargs['summary3'].iloc[j]['''Max relevance_tfiltered''']}"
+                                    )
+                                )
+                                display(
+                                    Markdown(
+                                        f"Number of hits: {kwargs['summary3'].iloc[j].Hits_tfiltered}"
+                                    )
+                                )
+                                display(
+                                    Markdown(
+                                        f"Temperature range (&deg;C): {'-'.join([str(temp) for temp in Trangei])}"
+                                    )
+                                )
+                                display(
+                                    Markdown(
+                                        "*Temperature range is based on 5th to 95th percentile of top 10 % relevant reactions*"
+                                    )
+                                )
+                                reactionid_imp = widgets.SelectionSlider(
+                                    options=[""],
+                                    description="Reaction ID",
+                                    continuous_update=False,
+                                )
+                                instance_imp = widgets.SelectionSlider(
+                                    description="Instance",
+                                    options=[0],
+                                    continuous_update=False,
+                                )
+                                reactionid_imptext = widgets.Text(
+                                    description="Reaction ID", value=""
+                                )
+
+                                customrxnsmiles_imp = widgets.Text(
+                                    description="Custom Reaction SMILES",
+                                    style={"description_width": "initial"},
+                                )
+
+                                (
+                                    reactionid_imp,
+                                    reactionid_imptext,
+                                    instance_imp,
+                                    customrxnsmiles_imp,
+                                ) = updatereactionwidget(
+                                    reactionid_imp,
+                                    instance_imp,
+                                    kwargs["summary3"].iloc[j].Frame4,
+                                    reactionid_imptext,
+                                    customrxnsmiles_imp,
+                                )
+                                display(
+                                    Markdown("## <center>Analogue Reactions</center>")
+                                )
+                                impui = widgets.VBox(
+                                    [reactionid_imp, reactionid_imptext]
+                                )
+                                display(
+                                    widgets.HBox(
+                                        [impui, instance_imp],
+                                        layout=widgets.Layout(border="5px solid green"),
+                                    )
+                                )
+                                analgframe = kwargs["summary3"].iloc[j].Frame4
+                                i += 1
+                                j += 1
+
+                                def traceimprxns(reactionid, instance):
+                                    if (reactionid, instance) in analgframe.index:
+                                        reactiondf = impframe_old.xs(
+                                            (reactionid, instance)
+                                        )
+                                        if isinstance(reactiondf, pd.DataFrame):
+                                            reactiondf = reactiondf.iloc[0]
+                                        display(
+                                            drawReaction(
+                                                rdChemReactions.ReactionFromSmarts(
+                                                    reactiondf.mapped_rxn,
+                                                    useSmiles=True,
+                                                )
+                                            )
+                                        )
+                                        display(
+                                            Markdown(
+                                                f"`Reaction SMILES: {reactiondf.mapped_rxn}`"
+                                            )
+                                        )
+                                        display(
+                                            Markdown(
+                                                f"Relevance: {reactiondf.Relevance_morgan}"
+                                            )
+                                        )
+                                        LHSdata = {
+                                            specid: {
+                                                "smiles": reactiondf.LHSdata[specid][
+                                                    "smiles"
+                                                ],
+                                                "count": reactiondf.LHSdata[specid][
+                                                    "count"
+                                                ],
+                                                "name": reactiondf.NameDict[specid],
+                                            }
+                                            for specid in reactiondf.LHSdata
+                                        }
+                                        display(Markdown(f"Reactant Data: {LHSdata}"))
+                                        rgts = set(reactiondf.ReagentID) - set(
+                                            reactiondf.LHS
+                                        )
+                                        if rgts:
+                                            Rgtdata = {
+                                                specid: {
+                                                    "smiles": reactiondf.Rgtdata[
+                                                        specid
+                                                    ]["smiles"],
+                                                    "count": reactiondf.Rgtdata[specid][
+                                                        "count"
+                                                    ],
+                                                    "name": reactiondf.NameDict[specid],
+                                                }
+                                                for specid in rgts
+                                            }
+                                            display(
+                                                Markdown(f"Reagent Data: {Rgtdata}")
+                                            )
+
+                                        cats = reactiondf.CatalystID2
+                                        if cats:
+                                            Catdata = {
+                                                specid: {
+                                                    "name": reactiondf.NameDict[specid]
+                                                }
+                                                for specid in cats
+                                            }
+                                            display(
+                                                Markdown(f"Catalyst Data: {Catdata}")
+                                            )
+                                        solvs = reactiondf.SolventID
+                                        if solvs:
+                                            if "Solvdata" in reactiondf:
+                                                Solvdata = {
+                                                    specid: {
+                                                        "smiles": reactiondf.Solvdata[
+                                                            specid
+                                                        ]["smiles"],
+                                                        "count": reactiondf.Solvdata[
+                                                            specid
+                                                        ]["count"],
+                                                        "name": reactiondf.NameDict[
+                                                            specid
+                                                        ],
+                                                    }
+                                                    for specid in solvs
+                                                }
+                                            elif "analoguerxns_updated" in kwargs:
+                                                Solvdata = {
+                                                    specid: {
+                                                        "smiles": kwargs[
+                                                            "analoguerxns_updated"
+                                                        ]
+                                                        .xs((reactionid, instance))
+                                                        .Solvdata[specid]["smiles"],
+                                                        "count": kwargs[
+                                                            "analoguerxns_updated"
+                                                        ]
+                                                        .xs((reactionid, instance))
+                                                        .Solvdata[specid]["count"],
+                                                        "name": reactiondf.NameDict[
+                                                            specid
+                                                        ],
+                                                    }
+                                                    for specid in solvs
+                                                }
+                                            else:
+                                                Solvdata = {
+                                                    specid: {
+                                                        "name": reactiondf.NameDict[
+                                                            specid
+                                                        ]
+                                                    }
+                                                    for specid in solvs
+                                                }
+                                            display(
+                                                Markdown(f"Solvent Data: {Solvdata}")
+                                            )
+                                        RHSdata = {
+                                            specid: {
+                                                "smiles": reactiondf.RHSdata[specid][
+                                                    "smiles"
+                                                ],
+                                                "count": reactiondf.RHSdata[specid][
+                                                    "count"
+                                                ],
+                                            }
+                                            for specid in reactiondf.RHSdata
+                                        }
+                                        for specid in RHSdata:
+                                            if specid not in set(reactiondf.hcprod):
+                                                RHSdata[specid].update(
+                                                    {
+                                                        "name": reactiondf.NameDict[
+                                                            specid
+                                                        ]
+                                                    }
+                                                )
+                                        display(Markdown(f"Product Data: {RHSdata}"))
+                                        if reactiondf.Temperature:
+                                            display(
+                                                Markdown(
+                                                    f"Temperature (&deg;C): {reactiondf.Temperature}"
+                                                )
+                                            )
+                                        if reactiondf.Pressure:
+                                            display(
+                                                Markdown(
+                                                    f"Pressure (bar): {reactiondf.Pressure}"
+                                                )
+                                            )
+                                        if reactiondf.ReactionTime:
+                                            display(
+                                                Markdown(
+                                                    f"Reaction Time (hours): {reactiondf.ReactionTime}"
+                                                )
+                                            )
+                                        display(
+                                            Markdown(
+                                                f"Number of References:{reactiondf.NumRefs}"
+                                            )
+                                        )
+                                        display(
+                                            Markdown(
+                                                f"Number of Steps:{reactiondf.NumSteps}"
+                                            )
+                                        )
+                                        display(
+                                            Markdown(
+                                                f"Number of Stages:{reactiondf.NumStages}"
+                                            )
+                                        )
+                                        if reactiondf.YearPublished:
+                                            display(
+                                                Markdown(
+                                                    f"Year Published:{reactiondf.YearPublished}"
+                                                )
+                                            )
+                                        if reactiondf.ConditionNotes:
+                                            display(
+                                                Markdown(
+                                                    f"Condition Notes:{reactiondf.ConditionNotes}"
+                                                )
+                                            )
+
+                                outimpa = widgets.interactive_output(
+                                    traceimprxns,
+                                    {
+                                        "reactionid": reactionid_imp,
+                                        "instance": instance_imp,
+                                    },
+                                )
+                                display(outimpa)
+
+                                if kwargs["impfinalfilt"] is not None:
+                                    impframe_old = (
+                                        kwargs["impfinalfilt"]
+                                        .loc[
+                                            kwargs["impfinalfilt"].impurityrxn == imprxn
+                                        ]
+                                        .sort_values(
+                                            by="Relevance_morgan", ascending=False
+                                        )
+                                    )
+                                    rejrxns = impframe_old.loc[
+                                        impframe_old.Relevance_morgan
+                                        > kwargs["summary3"].iloc[i][
+                                            """Max relevance_tfiltered"""
+                                        ]
+                                    ]
+                                    if not rejrxns.empty:
+                                        reactionid_rej = widgets.SelectionSlider(
+                                            options=[""],
+                                            description="Reaction ID",
+                                            continuous_update=False,
+                                        )
+                                        instance_rej = widgets.SelectionSlider(
+                                            description="Instance",
+                                            options=[0],
+                                            continuous_update=False,
+                                        )
+                                        reactionid_rejtext = widgets.Text(
+                                            description="Reaction ID", value=""
+                                        )
+                                        customrxnsmiles_rej = widgets.Text(
+                                            description="Custom Reaction SMILES",
+                                            style={"description_width": "initial"},
+                                        )
+
+                                        (
+                                            reactionid_rej,
+                                            reactionid_rejtext,
+                                            instance_rej,
+                                            customrxnsmiles_rej,
+                                        ) = updatereactionwidget(
+                                            reactionid_rej,
+                                            instance_rej,
+                                            rejrxns,
+                                            reactionid_rejtext,
+                                            customrxnsmiles_rej,
+                                        )
+
+                                        def tracerejrxns(reactionid, instance):
+                                            if (
+                                                reactionid,
+                                                instance,
+                                            ) in rejrxns.index:
+                                                reactiondf = rejrxns.xs(
+                                                    (reactionid, instance)
+                                                )
+                                                if isinstance(reactiondf, pd.DataFrame):
+                                                    reactiondf = reactiondf.iloc[0]
+                                                display(
+                                                    drawReaction(
+                                                        rdChemReactions.ReactionFromSmarts(
+                                                            reactiondf.mapped_rxn,
+                                                            useSmiles=True,
+                                                        )
+                                                    )
+                                                )
+                                                display(
+                                                    Markdown(
+                                                        f"`Reaction SMILES: {reactiondf.mapped_rxn}`"
+                                                    )
+                                                )
+                                                for dfname in errorcodedict:
+                                                    if (
+                                                        dfname in kwargs
+                                                        and kwargs[dfname] is not None
+                                                    ):
+                                                        if (
+                                                            reactionid,
+                                                            instance,
+                                                        ) not in kwargs[dfname].index:
+                                                            errorcode = errorcodedict[
+                                                                dfname
+                                                            ]
+                                                            display(
+                                                                Markdown(
+                                                                    f"<strong>Reaction removed due to: {errorcode}</strong>"
+                                                                )
+                                                            )
+                                                            break
+                                                    elif dfname == "Frame2":
+                                                        if (
+                                                            reactionid,
+                                                            instance,
+                                                        ) not in kwargs[
+                                                            "summary3"
+                                                        ].iloc[
+                                                            i
+                                                        ].Frame3.index:
+                                                            errorcode = errorcodedict[
+                                                                dfname
+                                                            ]
+                                                            display(
+                                                                Markdown(
+                                                                    f"Reaction removed due to: {errorcode}"
+                                                                )
+                                                            )
+                                                            break
+                                                    elif dfname == "Frame4":
+                                                        if (
+                                                            reactionid,
+                                                            instance,
+                                                        ) not in kwargs[
+                                                            "summary3"
+                                                        ].iloc[
+                                                            i
+                                                        ].Frame4.index:
+                                                            errorcode = errorcodedict[
+                                                                dfname
+                                                            ]
+                                                            display(
+                                                                Markdown(
+                                                                    f"Reaction removed due to: {errorcode}"
+                                                                )
+                                                            )
+                                                            break
+                                                display(
+                                                    Markdown(
+                                                        f"Relevance: {reactiondf.Relevance_morgan}"
+                                                    )
+                                                )
+                                                LHSdata = {
+                                                    specid: {
+                                                        "smiles": reactiondf.LHSdata[
+                                                            specid
+                                                        ]["smiles"],
+                                                        "count": reactiondf.LHSdata[
+                                                            specid
+                                                        ]["count"],
+                                                        "name": reactiondf.NameDict[
+                                                            specid
+                                                        ],
+                                                    }
+                                                    for specid in reactiondf.LHSdata
+                                                }
+                                                display(
+                                                    Markdown(
+                                                        f"Reactant Data: {LHSdata}"
+                                                    )
+                                                )
+                                                rgts = set(reactiondf.ReagentID) - set(
+                                                    reactiondf.LHS
+                                                )
+                                                if rgts:
+                                                    Rgtdata = {
+                                                        specid: {
+                                                            "smiles": reactiondf.Rgtdata[
+                                                                specid
+                                                            ][
+                                                                "smiles"
+                                                            ],
+                                                            "count": reactiondf.Rgtdata[
+                                                                specid
+                                                            ]["count"],
+                                                            "name": reactiondf.NameDict[
+                                                                specid
+                                                            ],
+                                                        }
+                                                        for specid in rgts
+                                                    }
+                                                    display(
+                                                        Markdown(
+                                                            f"Reagent Data: {Rgtdata}"
+                                                        )
+                                                    )
+
+                                                cats = reactiondf.CatalystID2
+                                                if cats:
+                                                    Catdata = {
+                                                        specid: {
+                                                            "name": reactiondf.NameDict[
+                                                                specid
+                                                            ]
+                                                        }
+                                                        for specid in cats
+                                                    }
+                                                    display(
+                                                        Markdown(
+                                                            f"Catalyst Data: {Catdata}"
+                                                        )
+                                                    )
+                                                missingcatalyst = (
+                                                    reactiondf.MissingCatalyst
+                                                )
+                                                if missingcatalyst:
+                                                    display(
+                                                        Markdown(
+                                                            f"Missing Catalyst: {missingcatalyst}"
+                                                        )
+                                                    )
+                                                solvs = reactiondf.SolventID
+                                                if solvs:
+                                                    if "Solvdata" in reactiondf:
+                                                        Solvdata = {
+                                                            specid: {
+                                                                "smiles": reactiondf.Solvdata[
+                                                                    specid
+                                                                ][
+                                                                    "smiles"
+                                                                ],
+                                                                "count": reactiondf.Solvdata[
+                                                                    specid
+                                                                ][
+                                                                    "count"
+                                                                ],
+                                                                "name": reactiondf.NameDict[
+                                                                    specid
+                                                                ],
+                                                            }
+                                                            for specid in solvs
+                                                        }
+                                                    elif (
+                                                        "analoguerxns_updated" in kwargs
+                                                    ):
+                                                        Solvdata = {
+                                                            specid: {
+                                                                "smiles": kwargs[
+                                                                    "analoguerxns_updated"
+                                                                ]
+                                                                .xs(
+                                                                    (
+                                                                        reactionid,
+                                                                        instance,
+                                                                    )
+                                                                )
+                                                                .Solvdata[specid][
+                                                                    "smiles"
+                                                                ],
+                                                                "count": kwargs[
+                                                                    "analoguerxns_updated"
+                                                                ]
+                                                                .xs(
+                                                                    (
+                                                                        reactionid,
+                                                                        instance,
+                                                                    )
+                                                                )
+                                                                .Solvdata[specid][
+                                                                    "count"
+                                                                ],
+                                                                "name": reactiondf.NameDict[
+                                                                    specid
+                                                                ],
+                                                            }
+                                                            for specid in solvs
+                                                        }
+                                                    else:
+                                                        Solvdata = {
+                                                            specid: {
+                                                                "name": reactiondf.NameDict[
+                                                                    specid
+                                                                ]
+                                                            }
+                                                            for specid in solvs
+                                                        }
+                                                    display(
+                                                        Markdown(
+                                                            f"Solvent Data: {Solvdata}"
+                                                        )
+                                                    )
+                                                missingsolvent = (
+                                                    reactiondf.MissingSolvent
+                                                )
+                                                if missingsolvent:
+                                                    display(
+                                                        Markdown(
+                                                            f"Missing Solvent: {reactiondf.MissingSolvent}"
+                                                        )
+                                                    )
+                                                RHSdata = {
+                                                    specid: {
+                                                        "smiles": reactiondf.RHSdata[
+                                                            specid
+                                                        ]["smiles"],
+                                                        "count": reactiondf.RHSdata[
+                                                            specid
+                                                        ]["count"],
+                                                    }
+                                                    for specid in reactiondf.RHSdata
+                                                }
+                                                for specid in RHSdata:
+                                                    if specid not in set(
+                                                        reactiondf.hcprod
+                                                    ):
+                                                        RHSdata[specid].update(
+                                                            {
+                                                                "name": reactiondf.NameDict[
+                                                                    specid
+                                                                ]
+                                                            }
+                                                        )
+                                                display(
+                                                    Markdown(f"Product Data: {RHSdata}")
+                                                )
+                                                if reactiondf.Temperature:
+                                                    display(
+                                                        Markdown(
+                                                            f"Temperature (&deg;C): {reactiondf.Temperature}"
+                                                        )
+                                                    )
+                                                if reactiondf.Pressure:
+                                                    display(
+                                                        Markdown(
+                                                            f"Pressure (bar): {reactiondf.Pressure}"
+                                                        )
+                                                    )
+                                                if reactiondf.ReactionTime:
+                                                    display(
+                                                        Markdown(
+                                                            f"Reaction Time (hours): {reactiondf.ReactionTime}"
+                                                        )
+                                                    )
+                                                display(
+                                                    Markdown(
+                                                        f"Number of References:{reactiondf.NumRefs}"
+                                                    )
+                                                )
+                                                display(
+                                                    Markdown(
+                                                        f"Number of Steps:{reactiondf.NumSteps}"
+                                                    )
+                                                )
+                                                display(
+                                                    Markdown(
+                                                        f"Number of Stages:{reactiondf.NumStages}"
+                                                    )
+                                                )
+                                                if reactiondf.YearPublished:
+                                                    display(
+                                                        Markdown(
+                                                            f"Year Published:{reactiondf.YearPublished}"
+                                                        )
+                                                    )
+                                                if reactiondf.ConditionNotes:
+                                                    display(
+                                                        Markdown(
+                                                            f"Condition Notes:{reactiondf.ConditionNotes}"
+                                                        )
+                                                    )
+
+                                        outrej = widgets.interactive_output(
+                                            tracerejrxns,
+                                            {
+                                                "reactionid": reactionid_rej,
+                                                "instance": instance_rej,
+                                            },
+                                        )
+
+                                        display(
+                                            Markdown(
+                                                f"## <center>Rejected Analogue Reactions (>{kwargs['summary3'].iloc[i]['''Max relevance_tfiltered''']} relevance)</center>"
+                                            )
+                                        )
+                                        rejui = widgets.VBox(
+                                            [reactionid_rej, reactionid_rejtext]
+                                        )
+                                        display(
+                                            widgets.HBox(
+                                                [rejui, instance_rej],
+                                                layout=widgets.Layout(
+                                                    border="5px solid green"
+                                                ),
+                                            )
+                                        )
+                                        display(outrej)
+
+                        outimp = widgets.interactive_output(
+                            displayimpurities, {"impuritycount": impcountwidget}
+                        )
+                        display(outimp)
+
+                    elif view == "Reaction":
+                        if not displaywidget:
+                            reactionid_ir = widgets.SelectionSlider(
+                                options=[""],
+                                description="Reaction ID",
+                                continuous_update=False,
+                            )
+                            instance_ir = widgets.SelectionSlider(
+                                description="Instance",
+                                options=[0],
+                                continuous_update=False,
+                            )
+                            reactionid_irtext = widgets.Text(
+                                description="Reaction ID", value=""
+                            )
+                            customrxnsmiles_ir = widgets.Text(
+                                description="Custom Reaction SMILES",
+                                style={"description_width": "initial"},
+                            )
+                        else:
+                            reactionid_ir = reactionid_dp
+                            instance_ir = instance_dp
+                            reactionid_irtext = reactionid_dptext
+                            customrxnsmiles_ir = customrxnsmiles_dp
+                        for i, dfname in enumerate(
+                            [
+                                "impfinal",
+                                "impfinalfilt",
+                                "impfinalfilt2",
+                                "impfinalfilt3",
+                                "impfinalfilt4",
+                                "impfinalfilt5",
+                            ]
+                        ):
+                            if dfname in kwargs:
+                                df = kwargs[dfname]
+                                if df is not None:
+                                    df = verifyindex(df)
+                                    if not optionschanged:
+                                        (
+                                            reactionid_ir,
+                                            reactionid_irtext,
+                                            instance_ir,
+                                            customrxnsmiles_ir,
+                                        ) = updatereactionwidget(
+                                            reactionid_ir,
+                                            instance_ir,
+                                            df,
+                                            reactionid_irtext,
+                                            customrxnsmiles_ir,
+                                        )
+                                        optionschanged = True
+                            else:
+                                kwargs[dfname] = None
+
+            rxnview.on_click(functools.partial(on_view_clicked, view="Reaction"))
+            impview.on_click(functools.partial(on_view_clicked, view="Impurity"))
+            display(irmaster)
+
+            # def traceirrxns(reactionid, instance, customrxnsmiles):
+            #     global displaywidget, success
+
+            #     reactionidui = widgets.VBox([reactionid_ir, reactionid_irtext])
+            #     display(widgets.HBox([reactionidui, instance_ir, customrxnsmiles_ir]))
+            #     displaywidget = True
+            #     if kwargs["impfinalfilt"] is not None:
+            #         kwargs["impfinalfilt"]["Relevance_morgan"] = kwargs["impfinalfilt"][
+            #             "Relevance_morgan"
+            #         ].apply(lambda x: round(x, 2))
+            #     display(
+            #         Markdown(
+            #             "<h4><center><bold>12 & 13. Relevance and Conditions</bold></center></h4>"
+            #         )
             #     )
-            #     fragwidget = widgets.Dropdown(description="Fragment", options=[""], value="")
-            #     if 'LHSdata' in kwargs and kwargs['LHSdata'] is not None:
-            #         LHSdata=kwargs['LHSdata']
-            #     else:
-            #         LHSdata=None
-            #     if 'rxncentermapnum' in kwargs:
-            #         rxncenter=kwargs['rxncentermapnum']
-            #     else:
-            #         rxncenter=None
-            #     if 'specmap' in kwargs:
-            #         specmap=kwargs['specmap']
-            #     else:
-            #         specmap=None
 
-            #     def on_update_rxncenterwidget(*args):
-            #         if specmap is not None:
+            #     for i, dfname in enumerate(
+            #         [
+            #             "impfinalfilt",
+            #             "impfinal",
+            #             "analoguerxnsimpfilt",
+            #             "analoguerxnsimp",
+            #             "analoguerxnstempl",
+            #         ]
+            #     ):
+            #         success = False
+            #         if kwargs[dfname] is not None:
+            #             df = kwargs[dfname]
+            #             if (reactionid, instance) in df.index:
+            #                 success = True
+            #                 reactiondf = df.xs((reactionid, instance))
+            #                 if i <= 4:
+            #                     if "template" in reactiondf:
+            #                         if isinstance(reactiondf, pd.DataFrame):
+            #                             reactiondf_ = reactiondf.iloc[0]
+            #                         else:
+            #                             reactiondf_ = reactiondf
+            #                         display(
+            #                             Markdown(
+            #                                 f"<h4><center><strong>9. Template</strong></center></h4>"
+            #                             )
+            #                         )
+            #                         display(
+            #                             drawReaction(
+            #                                 rdChemReactions.ReactionFromSmarts(
+            #                                     reactiondf_.template
+            #                                 )
+            #                             )
+            #                         )
+            #                         display(
+            #                             Markdown(
+            #                                 f"`Template SMILES: {reactiondf_.template}`"
+            #                             )
+            #                         )
+            #                         display(
+            #                             Markdown(
+            #                                 f"<strong>Message:{reactiondf_.msg4}</strong>"
+            #                             )
+            #                         )
+            #                 if i <= 3:
+            #                     if kwargs["analoguerxnsimp"] is not None and i != 3:
+            #                         reactiondf_ = kwargs["analoguerxnsimp"].xs(
+            #                             (reactionid, instance)
+            #                         )
+            #                     else:
+            #                         reactiondf_ = reactiondf
+            #                     if "impurityrxn" in reactiondf_:
+            #                         display(
+            #                             Markdown(
+            #                                 f"<h4><center><strong>10. Template Application</strong></center></h4>"
+            #                             )
+            #                         )
+            #                         displaymsg = False
+            #                         if isinstance(reactiondf_, pd.DataFrame):
+            #                             for idx, reactiondf__ in reactiondf.iterrows():
+            #                                 if (
+            #                                     reactiondf__.impurityrxn
+            #                                     and reactiondf__.impurityrxn != "Error"
+            #                                 ):
+            #                                     display(
+            #                                         drawReaction(
+            #                                             rdChemReactions.ReactionFromSmarts(
+            #                                                 reactiondf__.impurityrxn,
+            #                                                 useSmiles=True,
+            #                                             )
+            #                                         )
+            #                                     )
+            #                                     display(
+            #                                         Markdown(
+            #                                             f"`Impurity Reaction SMILES: {reactiondf__.impurityrxn}`"
+            #                                         )
+            #                                     )
+            #                                 if not displaymsg:
+            #                                     display(
+            #                                         Markdown(
+            #                                             f"<strong>Message:{reactiondf__.msg5}</strong>"
+            #                                         )
+            #                                     )
+            #                                     displaymsg = True
+            #                         else:
+            #                             if (
+            #                                 reactiondf_.impurityrxn
+            #                                 and reactiondf_.impurityrxn != "Error"
+            #                             ):
+            #                                 for impurityrxn in reactiondf_.impurityrxn:
+            #                                     display(
+            #                                         drawReaction(
+            #                                             rdChemReactions.ReactionFromSmarts(
+            #                                                 list(impurityrxn)[0],
+            #                                                 useSmiles=True,
+            #                                             )
+            #                                         )
+            #                                     )
+            #                                     display(
+            #                                         Markdown(
+            #                                             f"`Impurity Reaction SMILES: {list(impurityrxn)[0]}`"
+            #                                         )
+            #                                     )
+            #                             display(
+            #                                 Markdown(
+            #                                     f"<strong>Message:{reactiondf_.msg5}</strong>"
+            #                                 )
+            #                             )
+            #                     if kwargs["impfinal"] is not None:
+            #                         display(
+            #                             Markdown(
+            #                                 f"<center><strong>{len(kwargs['impfinal'].index.unique())} reactions remaining after filtering</strong></center>"
+            #                             )
+            #                         )
+            #                 if i <= 1:
+            #                     if "msg6" in reactiondf:
+            #                         display(
+            #                             Markdown(
+            #                                 f"<h4><center><strong>11. Impurity Cleaning</strong></center></h4>"
+            #                             )
+            #                         )
+            #                         if isinstance(reactiondf, pd.DataFrame):
+            #                             reactiondf = reactiondf.iloc[0]
+            #                         if isinstance(reactiondf.msg6, pd.DataFrame):
+            #                             msg6 = reactiondf.msg6.iloc[0]
+            #                         else:
+            #                             msg6 = reactiondf.msg6
+            #                         display(
+            #                             Markdown(f"<strong>Message:{msg6}</strong>")
+            #                         )
+            #                     if kwargs["impfinalfilt"] is not None:
+            #                         display(
+            #                             Markdown(
+            #                                 f"<center><strong>{len(kwargs['impfinalfilt'].index.unique())} reactions remaining after filtering</strong></center>"
+            #                             )
+            #                         )
 
-            #     def on_update_substanceid_widget(*args):
-            #         if LHSdata is not None:
-            #             smileswidget.value=LHSdata[substanceidwidget.value]['smiles']
+            #                 break
 
-            #     def f(frag: str, spec: str, customspec: str):
-            #         if frag:
-            #             if spec:
-            #                 img, count = highlightsubstruct(spec, [frag], returncount=True)
-            #             elif customspec:
-            #                 img, count = highlightsubstruct(customspec, [frag], returncount=True)
-            #             display(img)
-            #             if spec:
-            #                 print(f"Species SMILES: {spec}")
-            #             elif customspec:
-            #                 print(f"Species SMILES: {customspec}")
-            #             print(f"Fragment identifier: {frag}")
-            #             print(f"Fragment count: {count[0]}")
+            # outip = widgets.interactive_output(
+            #     traceiprxns,
+            #     {
+            #         "reactionid": reactionid_ip,
+            #         "instance": instance_ip,
+            #         "customrxnsmiles": customrxnsmiles_ip,
+            #         # "analgrawcheck": analgrawcheck,
+            #         # "analgcheck": analgcheck,
+            #         # "analgbalcheck": analgbalcheck,
+            #         # "analgmapcheck": analgmapcheck,
+            #         # "analgcentcheck": analgcentcheck,
+            #     },
+            # )
 
-            #         smileswidget.options = list(specmap.keys())
-            #         smileswidget.value = list(specmap.keys())[0]
+            # display(outip)
 
 
 def updatereactionwidget(

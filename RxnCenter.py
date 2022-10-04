@@ -7,10 +7,19 @@ import modin.pandas as mpd
 import copy
 
 
-def reactioncenter(analoguerxnsassignedfilt, ncpus=16, restart=True):
+def reactioncenter(
+    analoguerxnsassignedfilt: pd.DataFrame, ncpus: int = 16, restart: bool = True
+) -> pd.DataFrame:
     """
-    Finds reaction center of a reaction
+    Args:
+        analoguerxnsassignedfilt (pd.DataFrame): Dataframe of analoguerxnsassignedfilt
+        ncpus (int, optional): Number of cpus to use. Defaults to 16.
+        restart (bool, optional): Restart the ray cluster. Defaults to True.
+
+    Returns:
+        pd.DataFrame: Dataframe of analoguerxnsassignedfilt with reaction center information added
     """
+
     if ncpus > 1:
         if restart:
             initray(num_cpus=ncpus)
