@@ -21,16 +21,22 @@
 # A. Method retrieve now supports clustering hitsets
 # A.1. Added optional arguments dbname and context, that are required to formulate group by statements
 
-import os, http.cookiejar, xml.dom.minidom, string, sys, re
-from urllib.request import Request, urlopen
+import argparse
+import http.cookiejar
+import os
+import os.path
+import re
+import string
+import sys
 
 # Newly added
 import time
-import argparse
 import traceback
-import os.path
-from lxml import etree
+import xml.dom.minidom
+from urllib.request import Request, urlopen
+
 import ray
+from lxml import etree
 
 #%% Parallel set-up (Comment if not desired) #%%
 # def initray(restart=True,num_cpus=16,log_to_driver=False):

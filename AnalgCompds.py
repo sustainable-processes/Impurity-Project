@@ -1,19 +1,21 @@
 # %load ./AnalgCompds.py
 
 import copy
+import sqlite3
+from collections import Counter
+from typing import Dict, List, Set, Tuple, Union
+
+import modin.pandas as mpd
+import pandas as pd
 from pydantic import validate_arguments
-from typing import List, Dict, Union, Tuple, Set
-from rdkit import Chem
+from rdkit import Chem, DataStructs
 from rdkit.Chem import AllChem
 from rdkit.Chem.Descriptors import MolWt
-from MainFunctions import molfromsmiles, CustomError, openpickle, initray
-from collections import Counter
-import sqlite3
-import pandas as pd
-from FindFunctionalGroups import identify_functional_groups as IFG
 from rdkit.Chem.Fingerprints import FingerprintMols
-from rdkit import DataStructs
-import modin.pandas as mpd
+
+from FindFunctionalGroups import identify_functional_groups as IFG
+from MainFunctions import CustomError, initray, molfromsmiles, openpickle
+
 
 # %% Fragment detection
 def getCarrierFrags0(

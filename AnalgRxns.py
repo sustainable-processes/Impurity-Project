@@ -1,13 +1,16 @@
 # %load ./AnalgRxns.py
 
-from collections import Counter
 import copy
-from typing import Dict, List, Set, Tuple, Union
-from MainFunctions import initray, molfromsmiles, getcompdict, CustomError
 import sqlite3
-import pandas as pd
+from collections import Counter
+from typing import Dict, List, Set, Tuple, Union
+
 import modin.pandas as mpd
+import pandas as pd
 from rdkit import Chem
+
+from MainFunctions import (CustomError, getcompdict, initray, molfromsmiles,
+                           writepickle)
 
 try:
     from ReaxysAPIv2 import main__
@@ -23,6 +26,8 @@ def getanaloguerxns(
     returnall: bool = True,
     reaxys_update: bool = True,
     refanaloguerxns: Union[List, str, pd.DataFrame] = None,
+    reactivityspec: Tuple = (),
+    fragdict: Dict = {},
     ncpus: int = 16,
     restart: bool = True,
 ):  # Done
@@ -85,6 +90,8 @@ def getanaloguerxns(
             combinedpoolex=combinedpoolex,
             relevance_s=relevance_s,
             relevance_m=relevance_m,
+            reactivityspec=reactivityspec,
+            fragdict=fragdict,
             axis=1,
             result_type="reduce",
         )
@@ -113,6 +120,8 @@ def getanaloguerxns(
                 combinedpoolex=combinedpoolex,
                 relevance_s=relevance_s,
                 relevance_m=relevance_m,
+                reactivityspec=reactivityspec,
+                fragdict=fragdict,
                 axis=1,
                 result_type="reduce",
             )
@@ -398,7 +407,13 @@ def filltemps(analoguerxns, ambienttemp=20):  # Done
 
 
 def checkanaloguerxns(
-    row, combinedpool, combinedpoolex=None, relevance_s="loose", relevance_m="loose"
+    row,
+    combinedpool,
+    combinedpoolex=None,
+    relevance_s="loose",
+    relevance_m="loose",
+    reactivityspec: Tuple = (),
+    fragdict: Dict = {},
 ):  # Done
     """
     Given a row, checks if either rcts, or rcts and reagents are analogue based on an analogue pool (combinedpool);
@@ -413,6 +428,7 @@ def checkanaloguerxns(
     'strictest': Reactants and reagents need to be analogue, not taking into account exemption list (combinedpool);
 
     """
+    status = False
     if combinedpoolex is None:
         combinedpoolex = combinedpool
     rct = set()
@@ -426,27 +442,94 @@ def checkanaloguerxns(
         if row["ReagentID"] != "NaN" and row["ReagentID"]:
             matches = [val in combinedpoolex for val in set(row["ReagentID"])]
             if any(matches) and rct.issubset(combinedpool):
-                return True
-            else:
-                return False
-    if relevance == "strict":
+                status = True
+    elif relevance == "strict":
         if row["ReagentID"] != "NaN" and row["ReagentID"]:
             matches = [val in combinedpoolex for val in set(row["ReagentID"])]
             if all(matches) and rct.issubset(combinedpool):
-                return True
-            else:
-                return False
-    if relevance == "strictest":
+                status = True
+    elif relevance == "strictest":
         if row["ReagentID"] != "NaN" and row["ReagentID"]:
             matches = [val in combinedpool for val in set(row["ReagentID"])]
             if all(matches) and rct.issubset(combinedpool):
-                return True
+                status = True
+    elif rct.issubset(combinedpool):
+        status = True
+    if not reactivityspec:
+        return status
+    ## New ##
+    elif status and fragdict:  # More detailed
+        status = False
+        if row["ReagentID"] != "NaN" and row["ReagentID"]:
+            speclist = rct.union(set(row["ReagentID"]))
+        else:
+            speclist = rct
+        combinedpool = set()
+        for frag in reactivityspec:
+            if isinstance(frag, tuple):
+                combinedpool = set().union(
+                    *[fragdict[frag_]["analoguepool"] for frag_ in frag]
+                )
             else:
-                return False
-    if rct.issubset(combinedpool):
-        return True
-    else:
-        return False
+                combinedpool = fragdict[frag]["analoguepool"]
+            matches = [val in combinedpool for val in speclist]
+            if any(matches):
+                status = True
+            else:
+                break
+        return status
+
+
+# def checkanaloguerxns(
+#     row, combinedpool, combinedpoolex=None, relevance_s="loose", relevance_m="loose"
+# ):  # Done
+#     """
+#     Given a row, checks if either rcts, or rcts and reagents are analogue based on an analogue pool (combinedpool);
+#     Include additional exemptions (eg. misclassified catalysts) under combinedpoolex.
+#     relevance_s is for single reference records, relevance_m is for multiple reference records
+#     For either option, specify relevance as:
+
+#     'loosest': Only reactants need to be analogue (combinedpool);
+#     'loose': Reactants need to be analogue but if any reagent is analogue this is accepted,
+#              taking into account exemption list (combinedpoolex);
+#     'strict': Reactants and reagents need to be analogue, taking into account exemption list (combinedpoolex);
+#     'strictest': Reactants and reagents need to be analogue, not taking into account exemption list (combinedpool);
+
+#     """
+#     if combinedpoolex is None:
+#         combinedpoolex = combinedpool
+#     rct = set()
+#     rct = set(row["ReactantID"])
+#     numrefs = row["NumRefs"]
+#     if numrefs == 1:  # Single reference record
+#         relevance = relevance_s
+#     else:  # Multiple reference record
+#         relevance = relevance_m
+#     if relevance == "loose":
+#         if row["ReagentID"] != "NaN" and row["ReagentID"]:
+#             matches = [val in combinedpoolex for val in set(row["ReagentID"])]
+#             if any(matches) and rct.issubset(combinedpool):
+#                 return True
+#             else:
+#                 return False
+#     if relevance == "strict":
+#         if row["ReagentID"] != "NaN" and row["ReagentID"]:
+#             matches = [val in combinedpoolex for val in set(row["ReagentID"])]
+#             if all(matches) and rct.issubset(combinedpool):
+#                 return True
+#             else:
+#                 return False
+#     if relevance == "strictest":
+#         if row["ReagentID"] != "NaN" and row["ReagentID"]:
+#             matches = [val in combinedpool for val in set(row["ReagentID"])]
+#             if all(matches) and rct.issubset(combinedpool):
+#                 return True
+#             else:
+#                 return False
+#     if rct.issubset(combinedpool):
+#         return True
+#     else:
+#         return False
 
 
 def userefrxns(
@@ -521,7 +604,11 @@ def updateanaloguerxns(
         )
     if not analoguerxns.empty:
         rxn_ids = [str(ID) for ID in list(analoguerxns.index)]
+        # writepickle(
+        #     rxn_ids, "/home/aa2133/Impurity-Project/Input/Suzuki/demo/", "rxn_ids"
+        # )  # new
         reaxys_final = []
+        i = 0  # new
         while rxn_ids:
             if len(rxn_ids) >= 5:
                 nsessions = 5
@@ -538,6 +625,17 @@ def updateanaloguerxns(
                 break
             reaxys_final += reaxys_dat
             rxn_ids = errorlst
+            # writepickle(
+            #     reaxys_final,
+            #     "/home/aa2133/Impurity-Project/Input/Suzuki/demo/",  # new
+            #     "analoguerxns" + str(i),
+            # )
+            # writepickle(
+            #     errorlst,
+            #     "/home/aa2133/Impurity-Project/Input/Suzuki/demo/",  # new
+            #     "error" + str(i),
+            # )
+            i += 1  # new
         analoguerxns_updated = pd.DataFrame(reaxys_final)
         if formatting:
             for colname in ["ReactionID", "NumRefs", "NumSteps", "NumStages"]:

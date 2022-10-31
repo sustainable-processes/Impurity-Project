@@ -1,10 +1,14 @@
 #%load ./RxnCenter.py
 
-import pandas as pd
-from MainFunctions import initray, molfromsmiles
-from FindFunctionalGroups import identify_functional_groups as IFG
-import modin.pandas as mpd
 import copy
+from typing import Tuple
+
+import modin.pandas as mpd
+import pandas as pd
+
+from FindFunctionalGroups import identify_functional_groups as IFG
+from MainFunctions import initray, molfromsmiles
+from rdkit import Chem
 
 
 def reactioncenter(
@@ -168,7 +172,7 @@ def getrxncenterrow(row):
 
 
 def storeatommap(mappedsmiles, specid=0, idx=0, atommap={}, neighbormap={}):
-    mappedmol = molfromsmiles(mappedsmiles)  # Hydrogens will never be mapped
+    mappedmol = molfromsmiles(mappedsmiles)  # Hydrogens will never be
     for atom in mappedmol.GetAtoms():
         if atom.HasProp("molAtomMapNumber"):
             mnum = atom.GetAtomMapNum()
@@ -407,20 +411,26 @@ def validrxncenter(specmap, rxncenter, LHSdata, rnbmap={}):
             #             breakpoint()
             if not assigned:  # changed atom not in any fragments
                 if rctid not in outfrag:
-                    outfrag.update({rctid: [changemapnum]})
+                    outfrag.update({rctid: {ridx: [changemapnum]}})
+                elif ridx not in outfrag[rctid]:
+                    outfrag[rctid].update({ridx: [changemapnum]})
                 else:
-                    outfrag[rctid].extend([changemapnum])
+                    outfrag[rctid][ridx].extend([changemapnum])
             #                     outfrag+=[rctid]
             if not fg:  # changed atom not in any functional groups
                 if rctid not in outfg:
-                    outfg.update({rctid: [changemapnum]})
+                    outfg.update({rctid: {ridx: [changemapnum]}})
+                elif ridx not in outfg[rctid]:
+                    outfg[rctid].update({ridx: [changemapnum]})
                 else:
-                    outfg[rctid].extend([changemapnum])
+                    outfg[rctid][ridx].extend([changemapnum])
             if not nb:  # changed atom neighbors functional groups
                 if rctid not in outneighbor:
-                    outneighbor.update({rctid: [changemapnum]})
+                    outneighbor.update({rctid: {ridx: [changemapnum]}})
+                elif ridx not in outneighbor[rctid]:
+                    outneighbor[rctid].update({ridx: [changemapnum]})
                 else:
-                    outneighbor[rctid].extend([changemapnum])
+                    outneighbor[rctid][ridx].extend([changemapnum])
     #%% New (SUSPECT)
     unusedanalogue = [
         ID
@@ -459,3 +469,69 @@ def validrxncenter(specmap, rxncenter, LHSdata, rnbmap={}):
     else:
         msg = ", ".join(addstr)
     return LHSdata, msg, outfrag, outfg, outneighbor, unusedanalogue
+
+
+def checkreactivityspecdf(
+    df: pd.DataFrame, reactivityspec: Tuple, ncpus: int = 16, restart: bool = True
+):
+    if ncpus > 1:
+        if restart:
+            initray(num_cpus=ncpus)
+        dfdis = mpd.DataFrame(df)
+    else:
+        dfdis = df
+
+    validlist = dfdis.apply(
+        checkreactivityspecrow,
+        reactivityspec=reactivityspec,
+        axis=1,
+        result_type="reduce",
+    )
+    # Remove this if want to use modin/distributed throughout
+    validlist = pd.Series(data=validlist.values, index=validlist.index)
+    keeplist = validlist[validlist.values == True].index
+    df = df[df.index.isin(keeplist)]
+    return df
+
+
+def checkreactivityspecrow(
+    row, reactivityspec
+):  # Checks whether reacting species follow the specified reactivity specification
+    LHSdata = row.LHSdata
+    usedids = {specid: [] for specid in LHSdata}
+    for frag in reactivityspec:
+        status = False
+        for specid in usedids:
+            if isinstance(frag, tuple):
+                if "reacfrag" in LHSdata[specid]:
+                    for inst in LHSdata[specid]["reacfrag"]:
+                        if inst not in usedids[specid]:
+                            fragsremain = set(
+                                LHSdata[specid]["reacfrag"][inst].keys()
+                            ) - set(frag)
+                            if not fragsremain:
+                                status = True
+                                usedids[specid].append(inst)
+                                break
+            else:
+                if "reacfrag" in LHSdata[specid]:
+                    for inst in LHSdata[specid]["reacfrag"]:
+                        if inst not in usedids[specid]:
+                            fragsremain = set(
+                                LHSdata[specid]["reacfrag"][inst].keys()
+                            ) - {frag}
+                            if not fragsremain:
+                                usedids[specid].append(inst)
+                                status = True
+                                break
+            if status:
+                break
+        if not status:
+            break
+    return status
+
+
+# analoguerxnsfinal = pd.read_pickle(
+#     "/home/aa2133/Impurity-Project/Input/Suzuki/Case6/DataProcessing/analoguerxnsfinal.pickle"
+# )
+# getrxncenterrow(analoguerxnsfinal.xs(45020110).iloc[0])

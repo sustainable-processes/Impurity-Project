@@ -1,19 +1,24 @@
 # %load ./GenTempl.py
+import copy
+import itertools
 from collections import Counter, OrderedDict
-import copy, itertools
+
 import modin.pandas as mpd
 import pandas as pd
 from rdkit import Chem
+from rdkit.Chem import Descriptors, rdChemReactions
+
 from AnalgCompds import findfrag
 from MainFunctions import initray, molfromsmiles
-from rdkit.Chem import rdChemReactions
-from rdkit.Chem import Descriptors
+
 
 # def replace_deuterated(smi):
 #     return re.sub('\[2H\]', r'[H]', smi)
 
 
-def gentemplate(analoguerxnsfinal, ncpus=16, restart=True, specificity="loose"):
+def gentemplate(
+    analoguerxnsfinal, ncpus=16, restart=True, specificity="loose", processall=False
+):
     if ncpus > 1:
         if restart:
             initray(num_cpus=ncpus)
@@ -21,7 +26,11 @@ def gentemplate(analoguerxnsfinal, ncpus=16, restart=True, specificity="loose"):
     else:
         analoguerxnsfinaldis = analoguerxnsfinal
     templts = analoguerxnsfinaldis.apply(
-        gen_template_row, specificity=specificity, axis=1, result_type="reduce"
+        gen_template_row,
+        specificity=specificity,
+        processall=processall,
+        axis=1,
+        result_type="reduce",
     )
     templtser = pd.Series(
         data=templts.values, index=templts.index
@@ -38,7 +47,7 @@ def gentemplate(analoguerxnsfinal, ncpus=16, restart=True, specificity="loose"):
     return analoguerxnstempl
 
 
-def gen_template_row(row, specificity="loose"):
+def gen_template_row(row, specificity="loose", processall=False):
     LHSdata = copy.deepcopy(row.LHSdata)
     RHSdata = copy.deepcopy(row.RHSdata)
     specmap = copy.deepcopy(row.specmap)
@@ -53,6 +62,7 @@ def gen_template_row(row, specificity="loose"):
         outfrag=outfrag,
         unusedanalogue=unusedanalogue,
         specificity=specificity,
+        processall=processall,
     )
 
 
@@ -202,12 +212,14 @@ def gen_template(
     outfrag={},
     unusedanalogue=[],
     specificity="loose",
+    processall=False,  # Will process all templates regardless of valid fragments reacting
 ):  # Invalid reactions outside fragments may yield general templates
     farfg = []
     unusedprod = []
     addstr = []
-    alloutfrag = []
+    alloutfrag = {}
     funcgroupmapnum = set()
+    combinedmap = {**specmap, **rnbmap}
 
     for analoguecompd in LHSdata:
         LHSdata_ = LHSdata[analoguecompd]
@@ -240,39 +252,52 @@ def gen_template(
             elif (
                 analoguecompd in outfrag
             ):  # Reaction center completely outside fragments
-                alloutfrag += [analoguecompd]
-            continue
-        for inst, fraginf in LHSdata_["reacfrag"].items():
-            reacfragidx = {
-                atomidx
-                for frag, matchidx in fraginf.items()
-                for match in matchidx
-                for atomidx in list(LHSdata_["fragloc"][inst][frag]["corrmatches"])[
-                    match
-                ]
-            }
-            try:
-                funcgroupids = {
+                alloutfrag.update({analoguecompd: outfrag[analoguecompd]})
+                # alloutfrag += [analoguecompd]
+            if not processall:
+                continue
+        if "reacfrag" in LHSdata_:
+            instlist = list(LHSdata_["reacfrag"].keys())
+        else:
+            instlist = []
+        outfraginst = []
+        if outfrag and analoguecompd in outfrag:
+            outfraginst = list(outfrag[analoguecompd].keys())
+        for inst in set(instlist + outfraginst):
+            reacfragidx = set()
+            funcgroupids = set()
+            if inst in instlist:
+                fraginf = LHSdata_["reacfrag"][inst]
+                # for inst, fraginf in LHSdata_["reacfrag"].items():
+                reacfragidx = {
                     atomidx
                     for frag, matchidx in fraginf.items()
                     for match in matchidx
-                    for atomidx in list(
-                        LHSdata_["fragloc"][inst][frag]["funcgroupids"]
-                    )[match]
+                    for atomidx in list(LHSdata_["fragloc"][inst][frag]["corrmatches"])[
+                        match
+                    ]
                 }
-            except IndexError:
-                funcgroupids = {}
-            if (
-                outfrag and analoguecompd in outfrag
-            ):  # Reaction center partially outside fragment
-                combinedmap = {**specmap, **rnbmap}
+                try:
+                    funcgroupids = {
+                        atomidx
+                        for frag, matchidx in fraginf.items()
+                        for match in matchidx
+                        for atomidx in list(
+                            LHSdata_["fragloc"][inst][frag]["funcgroupids"]
+                        )[match]
+                    }
+                except IndexError:
+                    pass
+            if inst in outfraginst:
+                if inst not in instlist:
+                    alloutfrag.update({analoguecompd:{inst:outfrag[analoguecompd][inst]}})
                 reacfragidx = reacfragidx.union(
-                    {combinedmap[mapnum][2] for mapnum in outfrag[analoguecompd]}
+                    {combinedmap[mapnum][2] for mapnum in outfrag[analoguecompd][inst]}
                 )
-                addstr.append(
-                    "Template expanded to include atoms in RC outside relevant fragments"
-                )
-            if type(inst) == tuple:
+                # addstr.append(
+                #     "Template expanded to include atoms in RC outside relevant fragments"
+                # )
+            if isinstance(inst, tuple):
                 reacmol = molfromsmiles(LHSdata_["mappedsmiles"][inst[0]][inst[1]])
             else:
                 reacmol = molfromsmiles(LHSdata_["mappedsmiles"][inst])
@@ -428,13 +453,6 @@ def gen_template(
                         LHSdata[analoguecompd]["templatefrag"][inst] = reacfragcurr
             RHSdata_["templatefragidx"].update({inst: prodfragidx})
             RHSdata_["templatefrag"].update({inst: prodfragcurr})
-    if alloutfrag:
-        msg4 = (
-            "Species "
-            + ", ".join([str(ID) for ID in alloutfrag])
-            + " react completely outside relevant fragments"
-        )
-        return "Error", LHSdata, RHSdata, msg4, farfg, unusedprod
     if farfg:
         addstr.append(
             "Reacting functional groups are too far away in "
@@ -447,6 +465,18 @@ def gen_template(
             + ", ".join([str(ID) for ID in unusedprod])
             + " is not produced from reacting fragments"
         )
+    if outfrag:
+        addstr.append(
+            "Template expanded to include atoms in RC outside relevant fragments"
+        )
+    if alloutfrag:
+        addstr.append(
+            "Species "
+            + ", ".join([str(ID) for ID in alloutfrag])
+            + " react completely outside relevant fragments"
+        )
+        if not processall:
+            return "Error", LHSdata, RHSdata, ", ".join(addstr), farfg, unusedprod
     if not addstr:
         msg4 = "Valid"
     else:
@@ -634,3 +664,9 @@ def get_strict_smarts_for_atom(atom, numHs_=None, degree_=None, charge_=None):
 
 def clear_isotope(mol):
     [a.SetIsotope(0) for a in mol.GetAtoms()]
+
+
+# analoguerxnsfinal = pd.read_pickle(
+#     "/home/aa2133/Impurity-Project/Input/Suzuki/Case6/DataProcessing/analoguerxnsfinal.pickle"
+# )
+# gen_template_row(analoguerxnsfinal.xs(45020110).iloc[0])

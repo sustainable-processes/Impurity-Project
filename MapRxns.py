@@ -1,14 +1,18 @@
 # %load ./MapRxns.py
 
+import copy
+from typing import List
+
+import modin.pandas as mpd
 import pandas as pd  # Preserve order of keys relative to reaction from left to right
 from rdkit import Chem
-import copy
+
 from AnalgRxns import userefrxns
-from typing import List
-from BalanceRxns import balancerxn, maprxn, checkrxn
-from MainFunctions import initray  # Importing RXNMapper for unsupervised atom mapping
+from BalanceRxns import balancerxn, checkrxn, maprxn
 from FindFunctionalGroups import identify_functional_groups as IFG
-import modin.pandas as mpd
+from MainFunctions import (  # Importing RXNMapper for unsupervised atom mapping
+    initray, molfromsmiles)
+
 
 #%% Reaction Mapping
 def maprxns(row):
@@ -469,12 +473,20 @@ def assignfrags_(LHSdata, fragdict, strict=False):
 
 #%% Substructure matching
 def update_matches(
-    mol, pattsmiles, checkresults=False, fragloc={}, nofg=set(), idx=0, rctid=0
+    mol,
+    pattsmiles,
+    checkresults=False,
+    fragloc={},
+    nofg=set(),
+    idx=0,
+    rctid=0,
 ):
     """
     Returns atom indices for substructure matches of a pattern in a molecule
     """
     #     breakpoint()
+    Chem.SanitizeMol(mol)
+    mol.UpdatePropertyCache(strict=False)
     patt = Chem.MolFromSmarts(pattsmiles)
     patt.UpdatePropertyCache(strict=False)
     corr_matches, funcgroupids, msg = get_matches(

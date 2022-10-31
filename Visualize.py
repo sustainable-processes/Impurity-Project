@@ -1,185 +1,54 @@
-from cProfile import label
+import functools
 from collections import Counter
-from typing import Dict, List, Tuple, Union
+from typing import List, Union
+
 import ipywidgets as widgets
-from ipywidgets import interact, Label, Layout
 import pandas as pd
-from tables import Description
+from IPython.display import Markdown, clear_output, display
+from ipywidgets import Layout
+from rdkit import Chem  # Importing RDKit
+from rdkit.Chem import Draw, rdChemReactions  # Reaction processing
+from rdkit.Chem.Draw import IPythonConsole
+
 from AnalgCompds import getCarrierFrags0
+from FunctionsDB import getmixturefrags
 from MainFunctions import (
-    CustomError,
-    drawMol,
     drawReaction,
-    getfragments,
     highlightsubstruct,
     molfromsmiles,
 )
-from rdkit import Chem  # Importing RDKit
-from rdkit.Chem import rdChemReactions, Draw  # Reaction processing
-from rdkit.Chem.Draw import IPythonConsole
-from IPython.display import display, Markdown, clear_output
-import functools
-from FunctionsDB import getmixturefrags
-from MapRxns import checkrxnrow, maprxn, updaterxns_
-from BalanceRxns import balancerxn
-from RxnCenter import getrxncenterrow, validrxncenterrow
-
-from helpCompound import hc_Dict
-from AnalgRxns import getspecdat_rxn
+from MapRxns import maprxn
 
 
-def balance_rxn_dp(rxn: str, **kwargs):
-    """_summary_
-
-    Args:
-        rxn (str): _description_
-
-    Returns:
-        _type_: _description_
-    """
-    IP = {
-        "reagents": [],  # Only if one reaction is inputted
-        "solvents": [],  # Only if one reaction is inputted
-        "coefflim": 6,  # Maximum tolerable stoichiometric coefficient
-        "usemapper": True,  # If mapper needs to be used
-        "addrctonly": False,  # If only reactants should be included for balancing
-        "ignoreH": False,  # If hydrogens are to be ignored when balancing
-        "hc_prod": hc_Dict,  # Help compound dictionary,
-        "coefflim": 6,
-        "hc_react": None,
-        "first": False,
-    }  # Help reactant dictionary
-    IP = {**IP, **kwargs}
-    Rdata, Pdata, Rgtdata, Solvdata = getspecdat_rxn(
-        rxn, reagents=IP["reagents"], solvents=IP["solvents"]
-    )
-    IP["addedspecies"] = [i for i in Rdata]
-    rxnsmiles0 = ">>".join(
-        [
-            getfragments([Rdata[r]["smiles"] for r in Rdata], smiles=True),
-            getfragments([Pdata[p]["smiles"] for p in Pdata], smiles=True),
-        ]
-    )
-    IP["rxnsmiles0"] = rxnsmiles0
-    input = {
-        key: IP[key]
-        for key in [
-            "rxnsmiles0",
-            "first",
-            "usemapper",
-            "addedspecies",
-            "hc_prod",
-            "hc_react",
-            "coefflim",
-            "addrctonly",
-            "ignoreH",
-        ]
-        if key in IP
-    }
-
-    (
-        rxnsmiles0,
-        balrxnsmiles,
-        msg,
-        LHSids,
-        RHSids,
-        hcrct,
-        hcprod,
-        LHSdata,
-        RHSdata,
-    ) = balancerxn(
-        Rdata,
-        Pdata,
-        Rgtdata=Rgtdata,
-        Solvdata=Solvdata,
-        **input,
-    )
-    mappedrxn, conf = maprxn([balrxnsmiles])
-    if mappedrxn != "Error":
-        rseries = pd.DataFrame(
-            [{"mapped_rxn": mappedrxn, "Rdata": LHSdata, "Pdata": RHSdata, "msg": msg}]
-        ).iloc[0]
-        LHSdata, RHSdata, msg1 = checkrxnrow(rseries)
-        if "Unmapped" in msg1 or "unmapped" in msg1:
-            (
-                mappedrxn,
-                conf,
-                balrxnsmiles,
-                msg,
-                LHSids,
-                RHSids,
-                hcrct,
-                hcprod,
-                LHSdata,
-                RHSdata,
-                msg1,
-            ) = updaterxns_(
-                pd.DataFrame(
-                    [
-                        {
-                            "Rdata": Rdata,
-                            "LHSdata": LHSdata,
-                            "RHSdata": RHSdata,
-                            "msg": msg,
-                            "hcprod": hcprod,
-                            "hcrct": hcrct,
-                            "Rgtdata": Rgtdata,
-                            "Solvdata": Solvdata,
-                        }
-                    ]
-                ).iloc[0]
-            )
-    else:
-        msg1 = "Mapping error"
-    return (
-        rxnsmiles0,
-        balrxnsmiles,
-        msg,
-        LHSids,
-        RHSids,
-        hcrct,
-        hcprod,
-        LHSdata,
-        RHSdata,
-        mappedrxn,
-        conf,
-        msg1,
-    )
 
 
-def rxn_center_dp(mappedrxn: str, LHSdata: Dict, RHSdata: Dict):
-    specmap, rnbmap, rxncentermapnum, msg = getrxncenterrow(
-        pd.DataFrame(
-            {"mapped_rxn": [mappedrxn], "LHSdata": [LHSdata], "RHSdata": [RHSdata]}
-        ).iloc[0]
-    )
-    if msg:
-        LHSdata, msg, outfrag, outfg, outneighbor, unusedanalogue = validrxncenterrow(
-            pd.DataFrame(
-                {
-                    "specmap": specmap,
-                    "rxncenter": rxncentermapnum,
-                    "LHSdata": LHSdata,
-                    "rnbmap": rnbmap,
-                }
-            ).iloc[0]
-        )
-    else:
-        outfrag = "Error"
-        outfg = "Error"
-        outneighbor = "Error"
-        unusedanalogue = "Error"
-    return (
-        specmap,
-        rnbmap,
-        rxncentermapnum,
-        LHSdata,
-        msg,
-        outfrag,
-        outfg,
-        outneighbor,
-        unusedanalogue,
-    )
+# (
+#     rxnsmiles0,
+#     balrxnsmiles,
+#     msg,
+#     LHSids,
+#     RHSids,
+#     hcrct,
+#     hcprod,
+#     LHSdata,
+#     RHSdata,
+#     mappedrxn,
+#     conf,
+#     msg1,
+# ) = balance_rxn_dp(
+#     "Brc1csc2ccccc12.OB(O)c1ccc2c(c1)c1ccccc1n2-c1ccccc1>>c1ccc(-n2c3ccccc3c3cc(-c4csc5ccccc45)ccc32)cc1"
+# )
+# (
+#     specmap,
+#     rnbmap,
+#     rxncentermapnum,
+#     LHSdata,
+#     msg,
+#     outfrag,
+#     outfg,
+#     outneighbor,
+#     unusedanalogue,
+# ) = rxn_center_dp(mappedrxn, LHSdata, RHSdata)
 
 
 def visfragment1(smiles: str, pattlist: List):
@@ -704,11 +573,9 @@ def tracemaster(
                             f"<center><strong>{len(kwargs['analoguerxns'])} reactions retrieved</strong></center>"
                         )
                     )
-                    reactionidui = widgets.VBox([reactionid_dp, reactionid_dptext])
-                    display(
-                        widgets.HBox([reactionidui, instance_dp, customrxnsmiles_dp])
-                    )
-                    displaywidget = True
+                reactionidui = widgets.VBox([reactionid_dp, reactionid_dptext])
+                display(widgets.HBox([reactionidui, instance_dp, customrxnsmiles_dp]))
+                displaywidget = True
                 if (
                     customrxnsmiles
                 ):  # User has defined a custom reaction SMILES (custom workflow is called)
@@ -1250,7 +1117,7 @@ def tracemaster(
                                     )
                                     display(
                                         Markdown(
-                                            f"`Template SMILES: {reactiondf_.template}`"
+                                            f"`Template SMARTS: {reactiondf_.template}`"
                                         )
                                     )
                                     display(

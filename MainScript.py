@@ -1,13 +1,13 @@
 # %load ./MainScript.py
 
 import copy
+import os
+
 import modin.pandas as mpd
 import pandas as pd
-import os
 from IPython.display import display
 from rdkit.Chem import rdChemReactions
-from MainFunctions import CustomError, drawReaction, openpickle, writepickle, initray
-from helpCompound import hc_Dict, hc_rct
+
 from AnalgCompds import (
     getanaloguespecies,
     getcombinedpool,
@@ -19,8 +19,7 @@ from AnalgRxns import addspeciesdata, filteranaloguerxns, getanaloguerxns
 from ApplyTempl import applytemplate, removeduplicates
 from BalanceRxns import balance_analogue_
 from GenTempl import gentemplate
-from MapRxns import assignfrags, checkrxns, map_rxns, updaterxns
-from RxnCenter import reactioncenter, validreactioncenter
+from helpCompound import hc_Dict, hc_rct
 from ImpurityCleaning import cleanimpurities
 from ImpurityRanking import (
     catfilter,
@@ -35,7 +34,9 @@ from ImpurityRanking import (
     updatecatalyst,
     updatetemp,
 )
-
+from MainFunctions import CustomError, drawReaction, initray, openpickle, writepickle
+from MapRxns import assignfrags, checkrxns, map_rxns, updaterxns
+from RxnCenter import checkreactivityspecdf, reactioncenter, validreactioncenter
 
 # Main Script
 masterdbreadpath = (
@@ -89,6 +90,7 @@ step4params = {
     "workflow": "strict",
     "returnall": True,
     "refanaloguerxns": None,
+    "reactivityspec": (),
     "analgidsdictfilename": "analgidsdict",
     "analgrxnsdictfilename": "analgrxnsdict",
     "analoguerxnsrawfilename": "analoguerxnsraw",
@@ -159,6 +161,8 @@ step9params = {
     "removefarfg": True,
     "removeunusedprod": True,
     "specificity": "loose",
+    "processall": False,
+    "removealloutfrag": True,
 }
 step10params = {
     "analoguerxnsimp": None,
@@ -671,6 +675,11 @@ def step3(IP):
 def step4(IP):  # MEMORY INTENSIVE
     combinedpool = IP["combinedpool"]
     combinedpoolex = IP["combinedpoolex"]
+    if IP["reactivityspec"]:
+        if IP["fragdict"] is None:
+            IP["fragdict"] = openpickle(
+                IP["dmdir"] + IP["fragdictfilename"] + ".pickle"
+            )
     if combinedpoolex is None:
         if combinedpool is None:
             combinedpool = openpickle(
@@ -699,6 +708,8 @@ def step4(IP):  # MEMORY INTENSIVE
         reaxys_update=IP["reaxys_update"],
         refanaloguerxns=IP["refanaloguerxns"],
         ncpus=IP["ncpus"],
+        reactivityspec=IP["reactivityspec"],
+        fragdict=IP["fragdict"],
     )
     if IP["writetofile"]:
         writepickle(analgidsdict, IP["dmdir"], IP["analgidsdictfilename"])
@@ -1018,6 +1029,10 @@ def step8(IP):
         ]
     else:
         analoguerxnsfinal = analoguerxnsvalid
+    if IP["reactivityspec"]:
+        analoguerxnsfinal = checkreactivityspecdf(
+            analoguerxnsfinal, IP["reactivityspec"], ncpus=IP["ncpus"]
+        )
     if IP["writetofile"]:
         pd.to_pickle(
             analoguerxnsfinal, IP["dpdir"] + IP["analoguerxnsfinalfilename"] + ".pickle"
@@ -1037,7 +1052,10 @@ def step9(IP):
                 IP["dpdir"] + IP["analoguerxnsfinalfilename"] + ".pickle"
             )
         analoguerxnstempl = gentemplate(
-            analoguerxnsfinal, ncpus=IP["ncpus"], specificity=IP["specificity"]
+            analoguerxnsfinal,
+            ncpus=IP["ncpus"],
+            specificity=IP["specificity"],
+            processall=IP["processall"],
         )
         if IP["writetofile"]:
             pd.to_pickle(
@@ -1046,9 +1064,22 @@ def step9(IP):
             )
         if IP["showresults"]:
             IP["analoguerxnstempl"] = analoguerxnstempl
-    analoguerxnstemplfilt = analoguerxnstempl.loc[analoguerxnstempl.template != "Error"]
+    if not IP["processall"]:
+        analoguerxnstemplfilt = analoguerxnstempl.loc[
+            analoguerxnstempl.template != "Error"
+        ]
+    elif IP["removealloutfrag"]:
+        analoguerxnstemplfilt = analoguerxnstempl.loc[
+            ~analoguerxnstempl.msg4.str.contains(
+                "completely outside", case=False, na=False
+            )
+        ]
+    else:
+        analoguerxnstemplfilt = analoguerxnstempl
     if IP["onlyvalidtempl"]:
-        analoguerxnstemplfilt = analoguerxnstempl.loc[analoguerxnstempl.msg4 == "Valid"]
+        analoguerxnstemplfilt = analoguerxnstemplfilt.loc[
+            analoguerxnstemplfilt.msg4 == "Valid"
+        ]
     else:
         if IP["removefarfg"]:
             analoguerxnstemplfilt = analoguerxnstemplfilt.loc[

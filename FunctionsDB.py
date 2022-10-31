@@ -409,6 +409,26 @@ def joindf(
     return DB
 
 
+def createspecfreqdb(
+    substancedb: Union[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """
+    Creates a dataframe with species and frequency of occurrence in a database.
+
+    Args:
+        substancedb (Union[str,pd.DataFrame]): Database to be analyzed. Can be either a filename or a dataframe.
+
+    Returns:
+        pd.DataFrame: Dataframe with species and frequency of occurrence in the database.
+    """
+    if isinstance(substancedb, str):
+        substancedb = pd.read_pickle(substancedb)
+    species = substancedb.groupby("Smiles").size().reset_index(name="Frequency")
+    species.sort_values(by="Frequency", ascending=False, inplace=True)
+    species.reset_index(drop=True, inplace=True)
+    return species
+
+
 #%% Deprecated..see DB_Reaxys.ipynb
 def buildfragdb(
     sdb=None,
