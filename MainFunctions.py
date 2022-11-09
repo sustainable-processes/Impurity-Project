@@ -1,23 +1,22 @@
 # %load ./MainFunctions.py
+import io
+import os  # Working with the OS
 from typing import Any, Dict, List, Tuple, Union
+
 import pandas as pd
 import ray
+from IPython.display import SVG  # For SVG support
+from PIL import Image  # Working with images
 from rdkit import Chem  # Importing RDKit
 from rdkit.Chem import Draw  # For drawing molecules/reactions
 from rdkit.Chem import rdChemReactions  # Reaction processing
 from rdkit.Chem.Draw import rdMolDraw2D  # Drawing 2D molecules/reactions
-from IPython.display import SVG  # For SVG support
-from PIL import Image  # Working with images
-import io
-import os  # Working with the OS
+import pickle
 
-try:
-    import pickle5 as pickle  # Only if pickle doesn't work
-except Exception:
-    import pickle
-import cairosvg
 import shutil
-from rdkit.Chem import PeriodicTable, GetPeriodicTable
+
+import cairosvg
+from rdkit.Chem import GetPeriodicTable, PeriodicTable
 from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
 #%% Generating mol files
