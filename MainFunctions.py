@@ -1,8 +1,11 @@
 # %load ./MainFunctions.py
 import io
 import os  # Working with the OS
+import pickle
+import shutil
 from typing import Any, Dict, List, Tuple, Union
 
+import cairosvg
 import pandas as pd
 import ray
 from IPython.display import SVG  # For SVG support
@@ -10,13 +13,8 @@ from PIL import Image  # Working with images
 from rdkit import Chem  # Importing RDKit
 from rdkit.Chem import Draw  # For drawing molecules/reactions
 from rdkit.Chem import rdChemReactions  # Reaction processing
-from rdkit.Chem.Draw import rdMolDraw2D  # Drawing 2D molecules/reactions
-import pickle
-
-import shutil
-
-import cairosvg
 from rdkit.Chem import GetPeriodicTable, PeriodicTable
+from rdkit.Chem.Draw import rdMolDraw2D  # Drawing 2D molecules/reactions
 from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
 #%% Generating mol files
@@ -76,7 +74,7 @@ def moveAtomMapsToNotes(m):
             # at.SetAtomMapNum(0)
 
 
-def drawReaction(rxn) -> SVG:
+def drawReaction(rxn,useSmiles=True) -> SVG:
     """
     Produces an SVG of a mapped reaction
 
@@ -90,7 +88,7 @@ def drawReaction(rxn) -> SVG:
     SVG image
 
     """
-    trxn = rdChemReactions.ChemicalReaction(rxn)
+    trxn = rdChemReactions.ReactionFromSmarts(rxn,useSmiles=useSmiles)
     for m in trxn.GetReactants():
         moveAtomMapsToNotes(m)
     for m in trxn.GetProducts():
@@ -523,8 +521,12 @@ def initray(restart: bool = True, num_cpus: int = 16, log_to_driver: bool = Fals
         log_to_driver (bool, optional): Controls if more fine-grained status information on parallel execution is outputted to console. Defaults to False.
     """
     if restart:
-        ray.shutdown()
-    ray.init(num_cpus=num_cpus, log_to_driver=log_to_driver)
+        # ray.shutdown()
+        # import gc
+        # gc.collect()
+        ray.init(num_cpus=num_cpus, log_to_driver=log_to_driver,ignore_reinit_error=True)
+    else:
+        ray.init(address="auto", num_cpus=num_cpus, log_to_driver=log_to_driver,ignore_reinit_error=True)
 
 
 def chunks(lst, s=None, k=None):
@@ -537,3 +539,5 @@ def chunks(lst, s=None, k=None):
             lst[i * (n // k) + min(i, n % k) : (i + 1) * (n // k) + min(i + 1, n % k)]
             for i in range(k)
         ]
+
+# drawReaction('C1CCOC1.Cc1ccc2c(Cl)nccc2c1[N+](=O)[O-].Cl>>Cc1ccc2c(=O)[nH]ccc2c1[N+](=O)[O-]')

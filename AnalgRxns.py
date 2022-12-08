@@ -752,7 +752,7 @@ def getspecdat(
 
 
 def getspecdat_rxn(
-    rxnsmiles: str, reagents: List = [], solvents: List = []
+    rxnsmiles: str, reagents: List = [], solvents: List = [], dicts=['Rdata','Pdata','Rgtdata','Solvdata']
 ) -> Tuple[Dict, Dict, Dict, Dict]:
     """
     A more general function of getspecdat that retrieves species data from a given reaction SMILES.
@@ -762,6 +762,7 @@ def getspecdat_rxn(
         rxnsmiles (str): Reaction SMILES
         reagents (List, optional): List of reagent SMILES. Defaults to [].
         solvents (List, optional): List of solvent SMILES. Defaults to [].
+        dicts (list, optional): List of dictionaries to be returned. Defaults to ['Rdata','Pdata','Rgtdata','Solvdata'].
 
     Raises:
         Exception: If invalid reaction SMILES is given
@@ -769,34 +770,44 @@ def getspecdat_rxn(
     Returns:
         Tuple[Dict, Dict,Dict,Dict]: Tuple of dictionaries of reactant, product, reagent and solvent data
     """
-    try:
+    Rdata={}
+    Pdata={}
+    Rgtdata={}
+    Solvdata={}
+    if "Rdata" in dicts or "Pdata" in dicts:
         splitrxn = rxnsmiles.split(">>")
         if len(splitrxn) == 1:  # Only reactants specified
             raise Exception
-        rcts = splitrxn[0].split(".")
-        prods = splitrxn[1].split(".")
-        rcts = [Chem.MolToSmiles(molfromsmiles(rct)) for rct in rcts]
-        prods = [Chem.MolToSmiles(molfromsmiles(prod)) for prod in prods]
-    except Exception:
-        print(
-            "Please supply valid reaction smiles. Reactant.Reactant >> Product.Product"
-        )
-    rcts = Counter(rcts)
-    prods = Counter(prods)
-    Rdata = {}
-    Pdata = {}
-    Rgtdata = {}
-    Solvdata = {}
-    for i, rct in enumerate(rcts):
-        Rdata.update(getcompdict(ID=i, smiles=rct))
-        Rdata[i]["count"] = rcts[rct]
-    for j, prod in enumerate(prods):
-        Pdata.update(getcompdict(ID=j, smiles=prod))
-        Pdata[j]["count"] = prods[prod]
-    for k, rgt in enumerate(reagents):
-        k = max(list(Rdata.keys())) + k + 1
-        Rgtdata.update(getcompdict(ID=k, smiles=rgt))
-    for f, solv in enumerate(solvents):
-        f = max(list(Rdata.keys()) + list(Rgtdata.keys())) + f + 1
-        Solvdata.update(getcompdict(ID=f, smiles=solv))
+        if "Rdata" in dicts:
+            rcts = splitrxn[0].split(".")
+            rcts = [Chem.MolToSmiles(molfromsmiles(rct)) for rct in rcts]
+            rcts = Counter(rcts)
+            for i, rct in enumerate(rcts):
+                Rdata.update(getcompdict(ID=i, smiles=rct))
+                Rdata[i]["count"] = rcts[rct]
+        if "Pdata" in dicts: 
+            prods = splitrxn[1].split(".")
+            prods = [Chem.MolToSmiles(molfromsmiles(prod)) for prod in prods]
+            prods = Counter(prods)
+            for j, prod in enumerate(prods):
+                Pdata.update(getcompdict(ID=j, smiles=prod))
+                Pdata[j]["count"] = prods[prod]
+            
+    if reagents and 'Rgtdata' in dicts:
+        reagents=[Chem.MolToSmiles(molfromsmiles(rgt)) for rgt in reagents]
+        for k, rgt in enumerate(reagents):
+            if Rdata:
+                k = max(list(Rdata.keys())) + k + 1
+            Rgtdata.update(getcompdict(ID=k, smiles=rgt))
+        
+    if solvents and 'Solvdata' in dicts:
+        solvents=[Chem.MolToSmiles(molfromsmiles(solv)) for solv in solvents]
+        for f, solv in enumerate(solvents):
+            if Rdata and Rgtdata:
+                f = max(list(Rdata.keys()) + list(Rgtdata.keys())) + f + 1
+            elif Rdata:
+                f=max(list(Rdata.keys())) + f + 1
+            elif Rgtdata:
+                f=max(list(Rgtdata.keys())) + f + 1
+            Solvdata.update(getcompdict(ID=f, smiles=solv))
     return Rdata, Pdata, Rgtdata, Solvdata

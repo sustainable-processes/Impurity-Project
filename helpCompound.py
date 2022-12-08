@@ -299,7 +299,7 @@ hc_smilesDict={hcid:Chem.MolToSmiles(Chem.MolFromSmiles(hcsmiles)) for hcid,hcsm
 
 hc_molDict = {hc: Chem.AddHs(Chem.MolFromSmiles(
     hc_smilesDict[hc])) for hc in hc_smilesDict}
-hc_Dict={i:getcompdict(ID=i,smiles=hcsmiles)[i] for i,hcsmiles in enumerate(hc_smilesDict.values())}
+hc_Dict={'h'+str(i):getcompdict(ID='h'+str(i),smiles=hcsmiles)['h'+str(i)] for i,hcsmiles in enumerate(hc_smilesDict.values())}
 for i in hc_Dict.keys():
-    hc_Dict[i].update({'rxs_ids':rxs_ids[i]})
-hc_rct={hcid:hc_Dict[hcid] for hcid in [1,2,3,10,11,12,13,14]} #Small compounds to add to LHS 
+    hc_Dict[i].update({'rxs_ids':rxs_ids[int(i.split('h')[1])]})
+hc_rct={hcid:hc_Dict[hcid] for hcid in ['h1','h2','h3','h10','h11','h12','h13','h14']} #Small compounds to add to LHS 
