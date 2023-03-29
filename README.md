@@ -25,6 +25,8 @@ To install dependencies, type the following in anaconda prompt or a compatible I
 
 Remember to activate the environment via `conda activate <your-env-name>`. `environment_win.yml` contains more basic packages if not on Linux which will need to be built.
 
+MainScript.py contains and imports necessary code to run all workflow steps. This is invoked in the tutorial notebooks which the user can go through as explained below.
+
 ## Viewing Results
 
 Two tutorial files are given under the `Tutorial_Final` folder. `Tutorial-Jupyter Notebook_final.html` shows the workflow for the paracetamol case study (predicting impurities in paracetamol synthesis) with widgets and results visualized in an html file. It is advised to download this github repository as a .zip, and open `Tutorial-Jupyter Notebook_final.html` in Google Chrome for best results. `Tutorial-Jupyter Notebook_final.ipynb` is a jupyter notebook with the same workflow, but with no widget results shown (due to storage space limitations).
