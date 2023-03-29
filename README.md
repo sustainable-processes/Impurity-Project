@@ -1,8 +1,12 @@
 # Impurity Prediction
 
+[Graphical_Abstract_resized.pptx](https://github.com/sustainable-processes/Impurity-Project/files/11098221/Graphical_Abstract_resized.pptx)
+
+
 Contains developing code base for impurity prediction of reactions. At the moment, users need to have installed conda, anaconda or miniconda. Please refer to [Reaction Impurity Prediction using a Data Mining Approach](https://doi.org/10.1002/cmtd.202200062) for more details.
 
-![image](https://user-images.githubusercontent.com/45038622/228471794-195ba7fa-7ec3-4454-b6f1-081c94a2f92a.png)
+![image](https://user-images.githubusercontent.com/45038622/228474130-a4f942c1-41fb-4860-800b-fd05779b9cf2.png)
+
 
 
 ## Installation
