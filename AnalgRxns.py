@@ -13,7 +13,7 @@ from MainFunctions import (CustomError, getcompdict, initray, molfromsmiles,
                            writepickle)
 
 try:
-    from ReaxysAPIv2 import main__
+    from Reaxys_API.ReaxysAPIv2 import main__
 except ImportError:
     pass
 
