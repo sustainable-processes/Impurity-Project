@@ -21,13 +21,9 @@ OR
 
 To install dependencies, type the following in anaconda prompt or a compatible IDE:
 
-`conda env create -f environment_win.yml -n <your-env-name>` if OS is windows
-
-OR
-
 `conda env create -f environment_linux.yml -n <your-env-name>` if OS is linux/server based
 
-Remember to activate the environment via `conda activate <your-env-name>`
+Remember to activate the environment via `conda activate <your-env-name>`. `environment_win.yml` contains more basic packages if not on Linux which will need to be built.
 
 ## Viewing Results
 
