@@ -1,6 +1,6 @@
 # Impurity Prediction
 
-Contains developing code base for impurity prediction of reactions (In progress). At the moment, users need to have installed conda, anaconda or miniconda. Refer to Predict_Impurities(Codebase) jupyter notebook for details on how to use the workflow.
+Contains developing code base for impurity prediction of reactions. At the moment, users need to have installed conda, anaconda or miniconda. Please refer to [Reaction Impurity Prediction using a Data Mining Approach](https://doi.org/10.1002/cmtd.202200062) for more details.
 
 ## Installation
 
