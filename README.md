@@ -1,6 +1,7 @@
 # Impurity Prediction
 
-![image](https://user-images.githubusercontent.com/45038622/228474571-2673bfec-8b13-4e3e-bf1b-81ed977d2bb0.png)
+![image](https://user-images.githubusercontent.com/45038622/228474897-09955afd-c915-48d7-a44b-b1cbb7591130.png)
+
 
 
 Contains developing code base for impurity prediction of reactions. At the moment, users need to have installed conda, anaconda or miniconda. Please refer to [Reaction Impurity Prediction using a Data Mining Approach](https://doi.org/10.1002/cmtd.202200062) for more details.
