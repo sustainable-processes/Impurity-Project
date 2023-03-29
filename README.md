@@ -25,7 +25,7 @@ To install dependencies, type the following in anaconda prompt or a compatible I
 
 Remember to activate the environment via `conda activate <your-env-name>`. `environment_win.yml` contains more basic packages if not on Linux which will need to be built.
 
-MainScript.py contains and imports necessary code to run all workflow steps. This is invoked in the tutorial notebooks which the user can go through as explained below.
+`MainScript.py` contains and imports necessary code to run all workflow steps. This is invoked in the tutorial notebooks which the user can go through as explained below.
 
 ## Viewing Results
 
