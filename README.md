@@ -19,11 +19,10 @@ OR
 
 `git clone git@github.com:sustainable-processes/Impurity-Project.git` if SSH is configured
 
-To install dependencies, type the following in anaconda prompt or a compatible IDE:
-
-`conda env create -f environment_linux.yml -n <your-env-name>` if OS is linux/server based
-
-Remember to activate the environment via `conda activate <your-env-name>`. `environment_win.yml` contains more basic packages if not on Linux which will need to be built.
+To install dependencies, create a conda environment or virtual environment using python 3.9.13. Once the environment is activated,
+the requirements.txt file can be used:
+ 
+`pip install -r requirements.txt`
 
 `MainScript.py` contains and imports necessary code to run all workflow steps. This is invoked in the tutorial notebooks which the user can go through as explained below.
 
