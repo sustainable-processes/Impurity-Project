@@ -179,11 +179,10 @@ def tracemaster(
                     )
                     display(
                         drawReaction(
-                            rdChemReactions.ReactionFromSmarts(
-                                userinput, useSmiles=True
+                            userinput,
+                            useSmiles=True
                             )
                         )
-                    )
                     display(Markdown(f"`Query Reaction SMILES: {userinput}`"))
                     queryspecies = list(inputquery["species"].keys())
                     queryspec = widgets.Dropdown(
@@ -1111,11 +1110,9 @@ def tracemaster(
                                     )
                                     display(
                                         drawReaction(
-                                            rdChemReactions.ReactionFromSmarts(
-                                                reactiondf_.template
+                                                reactiondf_.template,useSmiles=False
                                             )
                                         )
-                                    )
                                     display(
                                         Markdown(
                                             f"`Template SMARTS: {reactiondf_.template}`"
@@ -1148,10 +1145,8 @@ def tracemaster(
                                             ):
                                                 display(
                                                     drawReaction(
-                                                        rdChemReactions.ReactionFromSmarts(
                                                             reactiondf__.impurityrxn,
                                                             useSmiles=True,
-                                                        )
                                                     )
                                                 )
                                                 display(
@@ -1174,12 +1169,10 @@ def tracemaster(
                                             for impurityrxn in reactiondf_.impurityrxn:
                                                 display(
                                                     drawReaction(
-                                                        rdChemReactions.ReactionFromSmarts(
                                                             list(impurityrxn)[0],
                                                             useSmiles=True,
                                                         )
                                                     )
-                                                )
                                                 display(
                                                     Markdown(
                                                         f"`Impurity Reaction SMILES: {list(impurityrxn)[0]}`"
@@ -1254,11 +1247,9 @@ def tracemaster(
                     )
                     display(
                         drawReaction(
-                            rdChemReactions.ReactionFromSmarts(
                                 userinput, useSmiles=True
                             )
                         )
-                    )
                     display(Markdown(f"`Query Reaction SMILES: {userinput}`"))
                     break
             for i, dfname in enumerate(
@@ -1466,12 +1457,10 @@ def tracemaster(
                                             reactiondf = reactiondf.iloc[0]
                                         display(
                                             drawReaction(
-                                                rdChemReactions.ReactionFromSmarts(
                                                     reactiondf.mapped_rxn,
                                                     useSmiles=True,
                                                 )
                                             )
-                                        )
                                         display(
                                             Markdown(
                                                 f"`Reaction SMILES: {reactiondf.mapped_rxn}`"
@@ -1710,12 +1699,10 @@ def tracemaster(
                                                     reactiondf = reactiondf.iloc[0]
                                                 display(
                                                     drawReaction(
-                                                        rdChemReactions.ReactionFromSmarts(
                                                             reactiondf.mapped_rxn,
                                                             useSmiles=True,
                                                         )
                                                     )
-                                                )
                                                 display(
                                                     Markdown(
                                                         f"`Reaction SMILES: {reactiondf.mapped_rxn}`"
@@ -2294,9 +2281,8 @@ def visreaction(rxnidentifier: str, **kwargs):
     try:
         display(
             drawReaction(
-                rdChemReactions.ReactionFromSmarts(rxnidentifier, useSmiles=True)
+            rxnidentifier, useSmiles=True)
             )
-        )
     except Exception as e:
         display(Markdown("Error"))
     display(Markdown(f"`Reaction SMILES: {rxnidentifier}`"))
@@ -3060,10 +3046,8 @@ def visoutput(analoguerxns: pd.DataFrame):
         if "rxnsmiles0" in analoguerxns.dtypes:
             rxnsmiles0 = analoguerxns.iloc[a].rxnsmiles0
             display(
-                drawReaction(
-                    rdChemReactions.ReactionFromSmarts(rxnsmiles0, useSmiles=True)
+                drawReaction(rxnsmiles0, useSmiles=True)
                 )
-            )
         if "balrxnsmiles" in analoguerxns.dtypes:
             balrxnsmiles = analoguerxns.iloc[a].balrxnsmiles
             msg = analoguerxns.iloc[a].msg
@@ -3071,10 +3055,8 @@ def visoutput(analoguerxns: pd.DataFrame):
             print("Balanced reaction:")
             if balrxnsmiles != "Error":
                 display(
-                    drawReaction(
-                        rdChemReactions.ReactionFromSmarts(balrxnsmiles, useSmiles=True)
+                    drawReaction(balrxnsmiles, useSmiles=True)
                     )
-                )
                 print(balrxnsmiles)
             else:
                 print("Error")
@@ -3088,10 +3070,8 @@ def visoutput(analoguerxns: pd.DataFrame):
         print("Mapped reaction:")
         if mappedrxn != "Error":
             display(
-                drawReaction(
-                    rdChemReactions.ReactionFromSmarts(mappedrxn, useSmiles=True)
+                drawReaction(mappedrxn, useSmiles=True)
                 )
-            )
         else:
             print(mappedrxn)
         if "msg1" in analoguerxns.dtypes:
@@ -3103,10 +3083,8 @@ def visoutput(analoguerxns: pd.DataFrame):
             print("Template message: " + msg4)
             print("Template:")
             display(
-                drawReaction(
-                    rdChemReactions.ReactionFromSmarts(template, useSmiles=True)
+                drawReaction(template, useSmiles=True)
                 )
-            )
             print("Template SMARTS: " + template)
 
     out = widgets.interactive_output(f, {"a": a})
@@ -3138,10 +3116,8 @@ def visoutput2(analoguerxns: pd.DataFrame):
                 analoguerxns.loc[analoguerxns.ReactionID == b].iloc[c].rxnsmiles0
             )
             display(
-                drawReaction(
-                    rdChemReactions.ReactionFromSmarts(rxnsmiles0, useSmiles=True)
+                drawReaction(rxnsmiles0, useSmiles=True)
                 )
-            )
         if "balrxnsmiles" in analoguerxns.dtypes:
             balrxnsmiles = (
                 analoguerxns.loc[analoguerxns.ReactionID == b].iloc[c].balrxnsmiles
@@ -3151,10 +3127,8 @@ def visoutput2(analoguerxns: pd.DataFrame):
             print("Balanced reaction:")
             if balrxnsmiles != "Error":
                 display(
-                    drawReaction(
-                        rdChemReactions.ReactionFromSmarts(balrxnsmiles, useSmiles=True)
+                    drawReaction(balrxnsmiles, useSmiles=True)
                     )
-                )
                 print(balrxnsmiles)
             else:
                 print("Error")
@@ -3170,10 +3144,8 @@ def visoutput2(analoguerxns: pd.DataFrame):
         print("Mapped reaction:")
         if mappedrxn != "Error":
             display(
-                drawReaction(
-                    rdChemReactions.ReactionFromSmarts(mappedrxn, useSmiles=True)
+                drawReaction(mappedrxn, useSmiles=True)
                 )
-            )
         else:
             print(mappedrxn)
         if "msg1" in analoguerxns.dtypes:
@@ -3185,10 +3157,8 @@ def visoutput2(analoguerxns: pd.DataFrame):
             print("Template message: " + msg4)
             print("Template:")
             display(
-                drawReaction(
-                    rdChemReactions.ReactionFromSmarts(template, useSmiles=True)
+                drawReaction(template, useSmiles=True)
                 )
-            )
 
     out = widgets.interactive_output(f, {"b": b, "c": c})
     display(b)

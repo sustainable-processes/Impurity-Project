@@ -235,11 +235,13 @@ def balancerxn(
         Rgtdata = {**Rgtdata, **Solvdata}  # Newly added
 
     #%% Initialize added species/addedhc (help compound) and add small species
+    if not mandrcts:
+        mandrcts = copy.deepcopy(Rdata)
     if first:
         addedspecies = []
         addedhc = []
-        if not mandrcts:
-            mandrcts = copy.deepcopy(Rdata)
+        # if not mandrcts:
+        #     mandrcts = copy.deepcopy(Rdata)
         if Rgtdata:
             #             smallspecies=[spec for spec in Rgtdata if Rgtdata[spec]['formula'] in ['H2','O2','H2O','OH2','HOH'] if spec not in Solvdata]
             #             smallspecies=[spec for spec in Rgtdata if Rgtdata[spec]['formula'] in ['H2','O2','H2O','OH2','HOH']]
@@ -416,7 +418,7 @@ def balancerxn(
             Rdata, addedspecies_, msg_ = resolvecandidates(
                 postype,
                 Rdata,
-                {**Rdata, **Rgtdata},
+                copy.deepcopy({**Rdata, **Rgtdata}),
                 candirxt + candirgt,
                 Pdata,
                 validate=False,
@@ -424,7 +426,7 @@ def balancerxn(
                 ignoreH=ignoreH,
             )
         elif not candirxt and not candirgt:
-            combineddict = {**Rdata, **Rgtdata}
+            combineddict = copy.deepcopy({**Rdata, **Rgtdata})
             candispec = [
                 specid
                 for specid in combineddict
@@ -1126,7 +1128,7 @@ def balance(
             ",".join([hc_react[species]["formula"] for species in addedhc])
         )
         if addedstr:
-            addedstr + ", " + addedstr2
+            addedstr=addedstr + ", " + addedstr2
         else:
             addedstr = addedstr2
     msg += addedstr
@@ -1377,9 +1379,12 @@ def resolvecandidates(
                             mult = mult2
                             break
     else:
+        match, _ = findmatch(postype, specdict[candidates[0]]["atomdict"])
+        matches=[match]
         mult = [1]
-
-    if len(candidates) > 1 and "Hydrogen carriers" not in msg:  # or ignoreH
+    print(postype)
+    print(candidates)
+    if (len(candidates) > 1 or (ignoreH and len(candidates)==1 and 1 not in matches)) and "Hydrogen carriers" not in msg:  # or ignoreH
         if len(postype) == 1 and "H" in postype:  # Still multiple options
             msg = "Hydrogen carriers: " + ",".join([str(candi) for candi in candidates])
             return Rdata, candidates, msg
@@ -1388,10 +1393,10 @@ def resolvecandidates(
     if update:
         for candi, mult_ in zip(candidates, mult):
             if candi in Rdata.keys():
-                Rdata[candi]["count"] += mult_
+                Rdata[candi]["count"] += (mult_*specdict[candi]['count']) #Added * specdict[count]
             else:
                 Rdata.update({candi: specdict[candi]})
-                Rdata[candi]["count"] = mult_
+                Rdata[candi]["count"] = mult_*specdict[candi]['count'] #Added * specdict[count]
     return Rdata, candidates, msg
 
 
@@ -1645,7 +1650,7 @@ def checkrxn(
             if smilesmismatch:
                 msgr += [
                     "Smiles discrepancy for LHS species: "
-                    + ", ".join([str(ID) for ID in smilesmismatch])
+                    + ",".join([str(ID) for ID in smilesmismatch])
                 ]
             else:
                 msgr += ["Smiles discrepancy for LHS species"]
@@ -1739,18 +1744,18 @@ def checkrxn(
             if removedmandrcts:
                 msgr += [
                     "Mandatory species unmapped from LHS: "
-                    + ", ".join([str(ID) for ID in removedmandrcts])
+                    + ",".join([str(ID) for ID in removedmandrcts])
                 ]
                 removedrcts = [ID0 for ID0 in removedrcts if ID0 not in removedmandrcts]
             if removedrcts:
                 msgr += [
                     "Unmapped species from LHS: "
-                    + ", ".join([str(ID) for ID in removedrcts])
+                    + ",".join([str(ID) for ID in removedrcts])
                 ]
             if runmapped:
                 msgr += [
                     "Unmapped species instances from LHS: "
-                    + ", ".join([str(ID) for ID in runmapped])
+                    + ",".join([str(ID) for ID in runmapped])
                 ]
     if Pdata:
         #         breakpoint()
@@ -1799,7 +1804,7 @@ def checkrxn(
             if smilesmismatch:
                 msgp += [
                     "Smiles discrepancy for RHS species: "
-                    + ", ".join([str(ID) for ID in smilesmismatch])
+                    + ",".join([str(ID) for ID in smilesmismatch])
                 ]
             else:
                 msgp += ["Smiles discrepancy for RHS species"]
@@ -1886,7 +1891,7 @@ def checkrxn(
             if removedmandprods:
                 msgp += [
                     "Mandatory species unmapped from RHS: "
-                    + ", ".join([str(ID) for ID in removedmandprods])
+                    + ",".join([str(ID) for ID in removedmandprods])
                 ]
                 removedprods = [
                     ID0 for ID0 in removedprods if ID0 not in removedmandprods
@@ -1894,12 +1899,12 @@ def checkrxn(
             if removedprods:
                 msgp += [
                     "Unmapped species from RHS: "
-                    + ", ".join([str(ID) for ID in removedprods])
+                    + ",".join([str(ID) for ID in removedprods])
                 ]
             if punmapped:
                 msgp += [
                     "Unmapped species instances from RHS: "
-                    + ", ".join([str(ID) for ID in punmapped])
+                    + ",".join([str(ID) for ID in punmapped])
                 ]
     msg = msgr + msgp
     if not msg:
