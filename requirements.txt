@@ -62,7 +62,7 @@ kiwisolver==1.4.4
 lit==16.0.5
 locket==1.0.0
 MarkupSafe==2.1.2
-matplotlib==3.7.1
+matplotlib==3.3.2
 matplotlib-inline==0.1.6
 mistune==2.0.5
 modin==0.21.0
