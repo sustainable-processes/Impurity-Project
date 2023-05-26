@@ -49,7 +49,7 @@ IP = {
     "shutdown_after": False,
 }  # Help reactant dictionary
 
-
+# USPTO specific code
 def balance_rxn_uspto_df(df: pd.DataFrame, IP=IP, **kwargs):
     if kwargs:
         IP = {**IP, **kwargs}
@@ -144,6 +144,9 @@ def parse_uspto(
         reagents = rxnsmilesgroup[1].split(".")
         rxnsmiles = ">>".join([rxnsmilesgroup[0], rxnsmilesgroup[2]])
     return rxnsmiles, reagents
+
+
+
 
 
 def balance_rxn_dp(rxn: str = "", IP=IP, rctstorgts=True, **kwargs):
